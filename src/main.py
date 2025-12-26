@@ -74,11 +74,14 @@ from ui.components.title_bar import TitleBar
 from ui.views.settings import SettingsView
 from ui.views.live_instance import LiveInstanceView
 from ui.views.history import HistoryView
+from ui.views.watchlist import WatchlistView
 from services.log_watcher import get_log_watcher
+from services.watchlist_alerts import get_alert_service
 from services.updater import UpdateService
 from services.websocket_pipeline import get_pipeline, get_event_handler
 from ui.dialogs.data_folder_setup import show_data_folder_setup
 from utils.paths import is_data_folder_configured
+from services.debug_controller import DebugController
 
 
 class GroupGuardianApp:
@@ -116,6 +119,11 @@ class GroupGuardianApp:
         # Update State
         self._update_available = False
         self._update_info = None  # (version, url, notes)
+
+        # Agentic Debug Interface
+        self._debug_controller = DebugController(self)
+        self._debug_controller.start_listener()
+
         
         # Setup theme
         setup_theme(page)
@@ -145,25 +153,84 @@ class GroupGuardianApp:
         # Live Monitor relies on local log files, so disable on mobile
         self._supports_live = page.platform not in [ft.PagePlatform.ANDROID, ft.PagePlatform.IOS]
         
-        # Start Log Watcher for global state (group detection) if supported
-        self._watcher = None
-        if self._supports_live:
-            try:
-                self._watcher = get_log_watcher(self._handle_global_log_event)
-                self._watcher.start()
-            except Exception as e:
-                print(f"Failed to start LogWatcher: {e}")
-                self._supports_live = False # Fallback if start fails
+        # Move LogWatcher start to async task to prevent init blocking
+        self.page.run_task(self._init_services)
         
         # Check if data folder needs to be configured (first launch)
+        print("Checking data folder configuration...")
         if not is_data_folder_configured():
+            print("Data folder not configured, showing setup...")
             # Show setup dialog - will call _on_data_folder_configured when done
             show_data_folder_setup(page, on_complete=self._on_data_folder_configured)
         else:
+            print("Data folder configured. Running startup tasks...")
             # Already configured, proceed with startup steps
             self.page.run_task(self._check_for_updates)
             self.page.run_task(self._check_existing_session)
+            print("Startup tasks scheduled.")
     
+    async def _init_services(self):
+        """Initialize background services asynchronously"""
+        import asyncio
+        
+        self._watcher = None
+        self._alert_service = None
+        
+        if self._supports_live:
+            try:
+                print("Starting LogWatcher (Async)...")
+                # get_log_watcher might allow thread start, which is fast.
+                self._watcher = get_log_watcher(self._handle_global_log_event)
+                self._watcher.start()
+                print("LogWatcher started (Async).")
+                
+                # Initialize alert service (will set API client after login)
+                self._alert_service = get_alert_service()
+                print("WatchlistAlertService initialized.")
+                
+                # Start background alert processing loop
+                self.page.run_task(self._process_alerts_loop)
+                
+            except Exception as e:
+                print(f"Failed to start LogWatcher: {e}")
+                self._supports_live = False
+    
+    async def _process_alerts_loop(self):
+        """Background loop to process pending watchlist alerts"""
+        import asyncio
+        while True:
+            try:
+                if self._alert_service and self._alert_service.enabled:
+                    await self._alert_service.process_pending_alerts()
+            except Exception as e:
+                logger.debug(f"Alert processing error: {e}")
+            await asyncio.sleep(1.0)  # Check for new alerts every second
+    
+    def _handle_global_log_event(self, event: dict):
+        """
+        Handle log watcher events globally.
+        
+        This method:
+        1. Passes events to WatchlistAlertService for alert processing
+        2. Updates GroupSelectionView on instance changes
+        
+        Note: LiveInstanceView handles its own events via direct LogWatcher registration.
+        """
+        if not self._supports_live:
+            return
+            
+        # Pass to alert service for watchlist notifications
+        if self._alert_service:
+            self._alert_service.on_event(event)
+        
+        # Handle instance changes for group selection view
+        if event.get("type") == "instance_change":
+            group_id = event.get("group_id")
+            
+            # If we are on the group selection screen, update it
+            if self._group_selection_view and self._current_route == "/groups":
+                self._group_selection_view.set_current_group_id(group_id)
+
     def _on_data_folder_configured(self, path: str):
         """Called when user completes data folder setup."""
         logger.info(f"Data folder configured: {path}")
@@ -173,36 +240,38 @@ class GroupGuardianApp:
     
     async def _check_existing_session(self):
         """Check if we have a valid saved session"""
-        print("Checking for existing session...")
+        logger.info("Checking for existing session...")
         # Add slight delay to let splash render if it was just added
         import asyncio
         await asyncio.sleep(0.1)
         
         try:
+            logger.info("Before api.check_session()...")
             result = await self._api.check_session()
+            logger.info(f"After api.check_session(). Result: {result}")
             
             if result.get("valid"):
                 user = result.get("user", {})
                 self._username = user.get("displayName", "User")
                 self._current_user = user
-                self._is_authenticated = True
-                print(f"Session valid! Logged in as: {self._username}")
-                # Show welcome screen -> group selection
-                self._show_welcome(user)
+                logger.info(f"Session valid! Logged in as: {self._username}")
+                # Use common login success handler to set up all services
+                self._handle_login_success()
             else:
-                print("No valid session, trying stored credentials...")
+                logger.info("No valid session, trying stored credentials...")
                 saved_user, saved_pass = self._load_credentials()
                 if saved_user and saved_pass:
-                    print(f"Found stored credentials for {saved_user}, attempting login...")
+                    logger.info(f"Found stored credentials for {saved_user}, attempting login...")
                     result = await self._do_login_sequence(saved_user, saved_pass)
                     if result.get("success"):
                         return
 
-                print("No valid session or credentials")
-                self._show_login()
+                logger.info("No valid session or credentials")
                 self._show_login()
         except Exception as e:
-            print(f"Session check error: {e}")
+            logger.error(f"Session check error: {e}")
+            import traceback
+            traceback.print_exc()
             self._show_login()
             
     async def _check_for_updates(self):
@@ -232,12 +301,7 @@ class GroupGuardianApp:
             logger.error(f"Update check failed: {e}")
     
     def _create_view_with_titlebar(self, content: ft.Control, keep_view_ref=None) -> ft.View:
-        """Create a view with custom title bar
-        
-        Args:
-            content: The content control or View to wrap
-            keep_view_ref: If content is a View, we need to manually update its page reference
-        """
+        """Create a view with custom title bar"""
         # If content is already a View, extract its controls
         if isinstance(content, ft.View):
             inner_controls = content.controls if content.controls else []
@@ -300,7 +364,10 @@ class GroupGuardianApp:
         
         view = self._create_view_with_titlebar(background)
         self.page.views.append(view)
-        self.page.update()
+        try:
+             self.page.update()
+        except:
+             pass
     
     def _show_login(self):
         """Show login view"""
@@ -432,6 +499,11 @@ class GroupGuardianApp:
         
         # Start WebSocket pipeline for real-time updates
         self.page.run_task(self._connect_pipeline)
+        
+        # Connect alert service to authenticated API
+        if self._alert_service:
+            self._alert_service.set_api(self._api)
+            logger.info("WatchlistAlertService connected to API")
         
         if self._current_user:
             self._show_welcome(self._current_user)
@@ -680,6 +752,11 @@ class GroupGuardianApp:
                 self._username = ""
                 self._welcome_view = None # Clear stale view reference
                 self._live_view = None # Clear stale live view reference
+                
+                # Disconnect alert service from old API
+                if self._alert_service:
+                    self._alert_service.set_api(None)
+                    
                 print("Logged out")
                 self.page.go("/login")
             finally:
@@ -935,6 +1012,12 @@ class GroupGuardianApp:
                  on_navigate=self._navigate
              )
         
+        elif route == "/watchlist":
+            return WatchlistView(
+                api=self._api,
+                on_navigate=self._navigate
+            )
+        
         elif route == "/logs":
             return self._placeholder_view("Audit Logs", "View moderation activity history")
         
@@ -943,23 +1026,6 @@ class GroupGuardianApp:
         
         else:
             return DashboardView()
-    
-    def _handle_global_log_event(self, event: dict):
-        """Handle global log events (e.g. for group detection)"""
-        if not self._supports_live:
-             return
-             
-        if event.get("type") == "instance_change":
-            group_id = event.get("group_id")
-            
-            # If we are on the group selection screen, update it
-            if self._group_selection_view and self._current_route == "/groups":
-                 # We must run UI updates on the main thread
-                 # Flet's page.run_task might be needed if called from thread
-                 # But modifying the view state and calling update() usually works if thread-safe
-                 # Or just rebuild the view logic?
-                 # GroupSelectionView has set_current_group_id
-                 self._group_selection_view.set_current_group_id(group_id)
 
     def _placeholder_view(self, title: str, subtitle: str) -> ft.Control:
         """Create a placeholder view for unimplemented routes"""
@@ -1021,11 +1087,16 @@ from ui.theme import radius, typography
 def main(page: ft.Page):
     """Application entry point"""
     # Handle auto-update process if flags are present
-    UpdateService.handle_update_process()
+    try:
+        UpdateService.handle_update_process()
+    except Exception as e:
+        print(f"Update service init error: {e}")
     
     try:
         GroupGuardianApp(page)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         page.clean()
         page.add(
             ft.Column([

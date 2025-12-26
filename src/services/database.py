@@ -112,8 +112,24 @@ class DatabaseService:
                 )
             """)
             
+            # Custom Tags table - stores tag definitions with colors/descriptions
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS custom_tags (
+                    name TEXT PRIMARY KEY,
+                    emoji TEXT DEFAULT '🏷️',
+                    color TEXT DEFAULT '#808080',
+                    description TEXT,
+                    is_default BOOLEAN DEFAULT 0,
+                    created_at TEXT
+                )
+            """)
+            
+            # Seed default tags if table is empty
+            self._seed_default_tags(conn)
+            
             # Migration: Add new columns if upgrading from old schema
             self._migrate_schema(conn)
+
             
             conn.commit()
             logger.info(f"Database initialized: {self.db_path}")
@@ -121,6 +137,35 @@ class DatabaseService:
             logger.error(f"Failed to init database: {e}")
         finally:
             conn.close()
+    
+    def _seed_default_tags(self, conn):
+        """Seed default watchlist tags if not already present"""
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        
+        default_tags = [
+            ("Crasher", "🚨", "#FF4444", "Known to crash sessions", 1),
+            ("Predator", "⚠️", "#FF0000", "Dangerous individual", 1),
+            ("Zoophile", "🚫", "#880000", "Known zoophile", 1),
+            ("Suspicious", "👀", "#FF9800", "Suspicious behavior", 1),
+            ("Bad Vibes", "💀", "#9C27B0", "Generally unpleasant", 1),
+            ("VIP", "⭐", "#FFD700", "Very important person", 1),
+            ("Friend", "💚", "#4CAF50", "Trusted friend", 1),
+            ("Mute Evader", "🔇", "#607D8B", "Uses alts to evade mutes", 1),
+            ("Bot/Alt", "🤖", "#795548", "Bot or alternate account", 1),
+            ("Harassment", "📛", "#E91E63", "Known harasser", 1),
+            ("Ripper", "🏴‍☠️", "#673AB7", "Rips avatars/worlds", 1),
+            ("Leaker", "💧", "#03A9F4", "Leaks private content", 1),
+        ]
+        
+        for name, emoji, color, desc, is_default in default_tags:
+            try:
+                conn.execute("""
+                    INSERT OR IGNORE INTO custom_tags (name, emoji, color, description, is_default, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (name, emoji, color, desc, is_default, now))
+            except Exception as e:
+                logger.debug(f"Tag {name} already exists or error: {e}")
     
     def _migrate_schema(self, conn):
         """Add new columns to existing tables if they don't exist"""
@@ -154,6 +199,7 @@ class DatabaseService:
                 logger.info("Renamed username to current_username")
             except:
                 pass
+
 
     # --- User Profile Management ---
 

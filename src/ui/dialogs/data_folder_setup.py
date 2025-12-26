@@ -29,7 +29,7 @@ class DataFolderSetupDialog(ft.AlertDialog):
         # Browse button
         self.browse_btn = ft.ElevatedButton(
             "Browse...",
-            icon=ft.icons.FOLDER_OPEN,
+            icon=ft.Icons.FOLDER_OPEN,
             on_click=self._on_browse,
             style=ft.ButtonStyle(
                 bgcolor=COLORS["surface_bright"],
@@ -88,7 +88,7 @@ class DataFolderSetupDialog(ft.AlertDialog):
                         ft.Container(
                             content=ft.Row(
                                 [
-                                    ft.Icon(ft.icons.INFO_OUTLINE, size=16, color=COLORS["text_muted"]),
+                                    ft.Icon(ft.Icons.INFO_OUTLINE, size=16, color=COLORS["text_muted"]),
                                     ft.Text(
                                         "This can be changed later in Settings.",
                                         size=11,
@@ -112,7 +112,7 @@ class DataFolderSetupDialog(ft.AlertDialog):
                 ),
                 ft.ElevatedButton(
                     "Continue",
-                    icon=ft.icons.CHECK,
+                    icon=ft.Icons.CHECK,
                     on_click=self._on_confirm,
                     style=ft.ButtonStyle(
                         bgcolor=COLORS["accent_primary"],
@@ -160,10 +160,9 @@ class DataFolderSetupDialog(ft.AlertDialog):
         # Save the data folder location
         set_data_folder(self._selected_path)
         
-        # Close dialog
-        self.open = False
+        # Close dialog using modern API
         if self.page:
-            self.page.update()
+            self.page.close(self)
         
         # Callback
         if self.on_complete:
@@ -180,7 +179,5 @@ def show_data_folder_setup(page: ft.Page, on_complete: callable = None):
     
     dialog = DataFolderSetupDialog(on_complete=on_complete)
     page.overlay.append(dialog.file_picker)
-    page.dialog = dialog
-    dialog.open = True
-    page.update()
+    page.open(dialog)  # Use modern Flet API
     return True

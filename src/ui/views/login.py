@@ -128,6 +128,7 @@ class LoginView(ft.View):
             cursor_color=colors.accent_secondary,
             on_submit=lambda e: self._password_field.focus(),
             height=48,
+            key="login_username"
         )
         
         # Password field - Explicitly defined with height
@@ -146,6 +147,7 @@ class LoginView(ft.View):
             cursor_color=colors.accent_secondary,
             on_submit=lambda e: self._handle_login(None),
             height=48,
+            key="login_password"
         )
         
         # Error text
@@ -165,6 +167,7 @@ class LoginView(ft.View):
             on_click=self._handle_login,
             expand=True,
             height=48,
+            key="login_submit"
         )
         
         # Remember me
@@ -237,6 +240,7 @@ class LoginView(ft.View):
                     style=ft.ButtonStyle(color=colors.accent_primary),
                     on_click=self.on_demo_login,
                     disabled=self.on_demo_login is None,
+                    key="login_demo"
                 ),
             ],
             spacing=0, # Using containers for explicit spacing control

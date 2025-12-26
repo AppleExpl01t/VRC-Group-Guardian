@@ -51,3 +51,7 @@ Create new views for sidebar navigation items.
 - [ ] Configure automation intervals.
 - [ ] Manage local blacklists (keywords, groups).
 - [ ] Save/Load configuration to `config.json`.
+
+## Bug Fixes & Improvements
+- [ ] **Critical**: Fix UserCard click registration issues. Users reported dead zones or unclickable items in lists (Live Monitor, Requests, Members, Watchlist).
+    - *Status*: Attempted fix by removing individual click handlers on child elements. User reports issue persists. Needs further investigation into Flet event bubbling or z-index layering.

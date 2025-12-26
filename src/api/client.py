@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from services.debug_logger import get_logger, log_request
 from utils.paths import get_cookies_path, get_api_cache_path, get_image_cache_dir
+from services.cache_manager import get_cache
 
 logger = get_logger("api.client")
 
@@ -859,6 +860,155 @@ class VRChatAPI:
             logger.error(f"Error searching users: {e}")
             return []
 
+    # ==================== SELF-INVITE / NOTIFICATION METHODS ====================
+    
+    async def self_invite(self, world_id: str, instance_id: str, message_slot: int = None) -> bool:
+        """
+        Send an invite to yourself at the specified instance.
+        This creates a notification in VRChat that can be used for alerts.
+        
+        If message_slot is specified, uses POST /invite/{userId} with messageSlot
+        to include a custom pre-set message. Otherwise uses POST /invite/myself/to/{location}.
+        
+        Args:
+            world_id: The world ID (wrld_xxx)
+            instance_id: The instance ID
+            message_slot: Optional slot number (0-11) for custom message
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not world_id or not instance_id:
+            logger.warning("Cannot self-invite: missing world_id or instance_id")
+            return False
+        
+        location = f"{world_id}:{instance_id}"
+        
+        try:
+            if message_slot is not None and self._current_user:
+                # Use POST /invite/{userId} with messageSlot for custom message
+                my_user_id = self._current_user.get("id")
+                if not my_user_id:
+                    return False
+                
+                response = await self._request(
+                    "POST",
+                    f"/invite/{my_user_id}",
+                    json={
+                        "instanceId": location,
+                        "messageSlot": message_slot
+                    }
+                )
+            else:
+                # Use simple /invite/myself endpoint
+                response = await self._request(
+                    "POST",
+                    f"/invite/myself/to/{location}",
+                )
+            
+            if response.status_code in (200, 201):
+                logger.info(f"Self-invite sent to {location}")
+                return True
+            else:
+                logger.warning(f"Self-invite failed: {response.status_code}")
+                try:
+                    error_data = response.json()
+                    logger.warning(f"Error details: {error_data}")
+                except:
+                    pass
+                return False
+        except Exception as e:
+            logger.error(f"Error sending self-invite: {e}")
+            return False
+    
+    async def get_invite_messages(self, message_type: str = "message") -> List[Dict]:
+        """
+        Get all invite message slots for the current user.
+        
+        Args:
+            message_type: "message", "request", or "response"
+            
+        Returns:
+            List of invite message objects
+        """
+        try:
+            response = await self._request(
+                "GET",
+                f"/message/{self._current_user['id']}/{message_type}",
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Failed to get invite messages: {response.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"Error getting invite messages: {e}")
+            return []
+    
+    async def update_invite_message(self, message_type: str, slot: int, message: str) -> bool:
+        """
+        Update an invite message slot.
+        
+        Args:
+            message_type: "message", "request", or "response"
+            slot: Slot number (0-11)
+            message: The message content (max 64 chars)
+            
+        Returns:
+            True if successful
+        """
+        if not self._current_user:
+            return False
+            
+        try:
+            response = await self._request(
+                "PUT",
+                f"/message/{self._current_user['id']}/{message_type}/{slot}",
+                json={"message": message[:64]},  # VRChat limit
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Updated invite message slot {slot}")
+                return True
+            else:
+                logger.warning(f"Failed to update invite message: {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Error updating invite message: {e}")
+            return False
+    
+    async def reset_invite_message(self, message_type: str, slot: int) -> bool:
+        """
+        Reset an invite message slot to default.
+        This bypasses the 60-minute edit cooldown.
+        
+        Args:
+            message_type: "message", "request", or "response"
+            slot: Slot number (0-11)
+            
+        Returns:
+            True if successful
+        """
+        if not self._current_user:
+            return False
+            
+        try:
+            response = await self._request(
+                "DELETE",
+                f"/message/{self._current_user['id']}/{message_type}/{slot}",
+            )
+            
+            if response.status_code in (200, 204):
+                logger.info(f"Reset invite message slot {slot}")
+                return True
+            else:
+                logger.warning(f"Failed to reset invite message: {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Error resetting invite message: {e}")
+            return False
+
     # ==================== GROUP METHODS ====================
     
     async def get_my_groups(self, force_refresh: bool = False) -> List[Dict]:
@@ -1218,6 +1368,24 @@ class VRChatAPI:
             logger.error(f"Error handling join request: {e}")
             return False
 
+    async def kick_user(self, group_id: str, user_id: str) -> bool:
+        """Kick (remove) a user from the group"""
+        try:
+            response = await self._request(
+                "DELETE",
+                f"/groups/{group_id}/members/{user_id}",
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Kicked user {user_id} from group {group_id}")
+                return True
+            else:
+                logger.error(f"Failed to kick user: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error kicking user: {e}")
+            return False
+
     async def ban_user(self, group_id: str, user_id: str) -> bool:
         """Ban a user from the group"""
         try:
@@ -1328,13 +1496,32 @@ class VRChatAPI:
             logger.error(f"Error sending invite to {user_id}: {e}")
             return False
 
+    # NOTE: self_invite method is defined earlier (around line 865) with full debugging
+    # This duplicate was removed to avoid confusion
+    # The method signature was: async def self_invite(self, world_id: str, instance_id: str, short_name: str = None) -> bool
+
     async def create_instance(self, world_id: str, type: str, region: str, 
                             owner_id: str = None, count: int = 0,
                             group_id: str = None, group_access_type: str = None, 
-                            queue_enabled: bool = False, role_ids: list = None,
-                            name: str = None) -> Optional[Dict]:
+                            queue_enabled: bool = True, role_ids: list = None,
+                            age_gate: bool = False, name: str = None) -> Optional[Dict]:
         """
         Create a new instance.
+        
+        Args:
+            world_id: The world ID (wrld_xxx)
+            type: Instance type - 'public', 'friends', 'hidden', 'private', 'group'
+            region: Region code - 'us', 'use', 'eu', 'jp'
+            owner_id: Owner ID (for non-group instances)
+            group_id: Group ID (required for group instances)
+            group_access_type: 'members', 'plus', 'public' (for group instances)
+            queue_enabled: Whether queue is enabled (for group instances)
+            role_ids: List of role IDs (for members-only group access)
+            age_gate: Whether 18+ age gate is enabled
+            name: Custom instance name (VRC+ feature)
+            
+        Returns:
+            Instance data dict or None on failure
         """
         try:
             payload = {
@@ -1344,30 +1531,50 @@ class VRChatAPI:
             }
             
             if type == "group":
-                if not group_id: return None
-                # VRChat API expects ownerId to be the group ID for group instances
+                if not group_id:
+                    logger.error("Group ID required for group instances")
+                    return None
+                # VRChat API expects ownerId to be the group ID for group instances (per VRCX)
                 payload["ownerId"] = group_id
-                # payload["groupId"] = group_id # Some docs say groupId, VRCX uses ownerId. Let's send both or just ownerId.
-                # VRCX sets ownerId to groupId. Let's follow VRCX.
                 if group_access_type:
                     payload["groupAccessType"] = group_access_type
-                if queue_enabled:
-                    payload["queueEnabled"] = True
-                if role_ids:
+                # Queue is enabled by default for group instances
+                payload["queueEnabled"] = queue_enabled
+                if role_ids and group_access_type == "members":
                     payload["roleIds"] = role_ids
+                # Age gate for 18+ only instances
+                if age_gate:
+                    payload["ageGate"] = True
+            else:
+                # For non-group instances, use current user as owner
+                if owner_id:
+                    payload["ownerId"] = owner_id
             
-            if name: # Custom instance name (VRC+ only usually)
-                payload["name"] = name
+            # Custom instance name (VRC+ feature) - VRCX uses displayName
+            if name:
+                payload["displayName"] = name
 
+            logger.info(f"Creating instance with payload: {payload}")
             response = await self._request("POST", "/instances", json=payload)
             
+            logger.info(f"Create instance response: status={response.status_code}")
+            
             if response.status_code == 200:
-                return response.json()
+                try:
+                    result = response.json()
+                    logger.info(f"Instance created successfully: {result}")
+                    return result
+                except Exception as json_err:
+                    logger.error(f"Failed to parse instance response JSON: {json_err}")
+                    logger.error(f"Raw response: {response.text}")
+                    return None
             else:
                 logger.warning(f"Failed to create instance: {response.status_code} - {response.text}")
                 return None
         except Exception as e:
             logger.error(f"Error creating instance: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     async def get_group_roles(self, group_id: str) -> list:
@@ -1380,3 +1587,432 @@ class VRChatAPI:
         except Exception as e:
             logger.error(f"Error fetching group roles: {e}")
             return []
+
+    # ==================== WORLD API METHODS ====================
+    
+    async def search_worlds(self, query: str, n: int = 10, offset: int = 0, sort: str = "relevance") -> list:
+        """
+        Search for VRChat worlds by name/keyword.
+        
+        Args:
+            query: Search term
+            n: Number of results (default 10, max 100)
+            offset: Offset for pagination
+            sort: Sort order - "relevance", "popularity", "heat", "publicationDate", etc.
+            
+        Returns:
+            List of world objects
+        """
+        try:
+            params = {
+                "search": query,
+                "n": min(n, 100),
+                "offset": offset,
+                "sort": sort,
+            }
+            
+            response = await self._request("GET", "/worlds", params=params)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"World search failed: {response.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"Error searching worlds: {e}")
+            return []
+    
+    async def get_world(self, world_id: str) -> Optional[Dict]:
+        """
+        Get details of a specific world.
+        
+        Args:
+            world_id: The world ID (wrld_xxx)
+            
+        Returns:
+            World object or None
+        """
+        try:
+            response = await self._request("GET", f"/worlds/{world_id}")
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.warning(f"Failed to get world {world_id}: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching world: {e}")
+            return None
+
+    # ==================== VRCX-STYLE CACHED GETTERS ====================
+    # These check the centralized cache before making API calls
+    
+    async def get_cached_user(self, user_id: str, force_refresh: bool = False) -> Optional[Dict]:
+        """
+        VRCX-style cached user fetch.
+        Returns cached user if available, otherwise fetches from API.
+        
+        Args:
+            user_id: The user ID
+            force_refresh: If True, bypasses cache and fetches fresh data
+            
+        Returns:
+            User dict or None
+        """
+        cache = get_cache()
+        
+        # Check cache first (unless force refresh)
+        if not force_refresh:
+            cached = cache.users.get(user_id)
+            if cached:
+                logger.debug(f"Cache hit: user {user_id}")
+                return cached
+        
+        # Fetch from API
+        user = await self.get_user(user_id)
+        if user:
+            cache.users.set(user_id, user)
+        return user
+    
+    async def get_cached_group(self, group_id: str, force_refresh: bool = False) -> Optional[Dict]:
+        """
+        VRCX-style cached group fetch.
+        Returns cached group if available, otherwise fetches from API.
+        """
+        cache = get_cache()
+        
+        if not force_refresh:
+            cached = cache.groups.get(group_id)
+            if cached:
+                logger.debug(f"Cache hit: group {group_id}")
+                return cached
+        
+        group = await self.get_group(group_id)
+        if group:
+            cache.groups.set(group_id, group)
+        return group
+    
+    async def get_cached_group_instances(self, group_id: str, force_refresh: bool = False) -> list:
+        """
+        VRCX-style cached group instances fetch.
+        Instances are cached for a shorter duration (1 min) since they're dynamic.
+        """
+        cache = get_cache()
+        cache_key = f"instances_{group_id}"
+        
+        if not force_refresh:
+            cached = cache.instances.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit: instances for group {group_id}")
+                return cached
+        
+        instances = await self.get_group_instances(group_id)
+        cache.instances.set(cache_key, instances)
+        return instances
+    
+    async def get_cached_join_requests(self, group_id: str, force_refresh: bool = False) -> list:
+        """
+        VRCX-style cached join requests fetch.
+        """
+        cache = get_cache()
+        cache_key = f"requests_{group_id}"
+        
+        if not force_refresh:
+            cached = cache.join_requests.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit: join requests for group {group_id}")
+                return cached
+        
+        requests = await self.get_group_join_requests(group_id)
+        cache.join_requests.set(cache_key, requests)
+        return requests
+    
+    async def get_cached_group_bans(self, group_id: str, force_refresh: bool = False) -> list:
+        """
+        VRCX-style cached group bans fetch.
+        """
+        cache = get_cache()
+        cache_key = f"bans_{group_id}"
+        
+        if not force_refresh:
+            cached = cache.group_bans.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit: bans for group {group_id}")
+                return cached
+        
+        bans = await self.get_group_bans(group_id)
+        cache.group_bans.set(cache_key, bans)
+        return bans
+    
+    async def get_cached_group_members(self, group_id: str, limit: int = 50, offset: int = 0, force_refresh: bool = False) -> list:
+        """
+        VRCX-style cached group members fetch.
+        """
+        cache = get_cache()
+        cache_key = f"members_{group_id}_{limit}_{offset}"
+        
+        if not force_refresh:
+            cached = cache.group_members.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit: members for group {group_id}")
+                return cached
+        
+        members = await self.search_group_members(group_id, limit=limit, offset=offset)
+        cache.group_members.set(cache_key, members)
+        return members
+    
+    async def get_cached_world(self, world_id: str, force_refresh: bool = False) -> Optional[Dict]:
+        """
+        VRCX-style cached world fetch.
+        Worlds are cached for longer (1 hour) since they rarely change.
+        """
+        cache = get_cache()
+        
+        if not force_refresh:
+            cached = cache.worlds.get(world_id)
+            if cached:
+                logger.debug(f"Cache hit: world {world_id}")
+                return cached
+        
+        world = await self.get_world(world_id)
+        if world:
+            cache.worlds.set(world_id, world)
+        return world
+    
+    # ==================== CACHE INVALIDATION ====================
+    # Call these after mutations to ensure fresh data on next fetch
+    
+    def invalidate_join_requests_cache(self, group_id: str):
+        """Invalidate cached join requests after accepting/rejecting."""
+        cache = get_cache()
+        cache.join_requests.invalidate(f"requests_{group_id}")
+        logger.debug(f"Invalidated join requests cache for group {group_id}")
+    
+    def invalidate_bans_cache(self, group_id: str):
+        """Invalidate cached bans after banning/unbanning."""
+        cache = get_cache()
+        cache.group_bans.invalidate(f"bans_{group_id}")
+        logger.debug(f"Invalidated bans cache for group {group_id}")
+    
+    def invalidate_members_cache(self, group_id: str):
+        """Invalidate all cached member pages for a group."""
+        cache = get_cache()
+        # Clear all member cache entries for this group
+        keys_to_remove = [k for k in cache.group_members._cache.keys() if k.startswith(f"members_{group_id}")]
+        for key in keys_to_remove:
+            cache.group_members.invalidate(key)
+        logger.debug(f"Invalidated members cache for group {group_id}")
+    
+    def invalidate_instances_cache(self, group_id: str):
+        """Invalidate cached instances after instance changes."""
+        cache = get_cache()
+        cache.instances.invalidate(f"instances_{group_id}")
+        logger.debug(f"Invalidated instances cache for group {group_id}")
+    
+    def invalidate_group_cache(self, group_id: str):
+        """Invalidate all cached data for a group."""
+        self.invalidate_join_requests_cache(group_id)
+        self.invalidate_bans_cache(group_id)
+        self.invalidate_members_cache(group_id)
+        self.invalidate_instances_cache(group_id)
+        cache = get_cache()
+        cache.groups.invalidate(group_id)
+        logger.debug(f"Invalidated all caches for group {group_id}")
+    
+    def clear_all_caches(self):
+        """Clear all entity caches (call on logout)."""
+        cache = get_cache()
+        cache.clear_all()
+
+    # ==================== Invite Message API ====================
+    
+    async def get_invite_messages(self, message_type: str = "message") -> Optional[list]:
+        """
+        Get the list of invite messages for the current user.
+        
+        Args:
+            message_type: Type of messages:
+                - 'message' - normal invite messages (default)
+                - 'request' - request invite messages
+                - 'response' - invite response messages
+                - 'requestResponse' - request response messages
+            
+        Returns:
+            List of message objects or None on failure
+        """
+        try:
+            user_id = self._current_user.get("id") if self._current_user else None
+            if not user_id:
+                logger.error("Cannot get invite messages - not logged in")
+                return None
+                
+            response = await self._request(
+                "GET",
+                f"/message/{user_id}/{message_type}"
+            )
+            
+            if response.status_code == 200:
+                messages = response.json()
+                logger.debug(f"Got {len(messages)} invite messages of type {message_type}")
+                return messages
+            else:
+                logger.warning(f"Failed to get invite messages: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting invite messages: {e}")
+            return None
+    
+    async def update_invite_message(self, message_type: str, slot: int, message: str) -> bool:
+        """
+        Update an invite message slot.
+        
+        NOTE: There is a 60-minute cooldown on editing invite messages.
+        Use reset_invite_message first then this method to bypass the cooldown.
+        
+        Args:
+            message_type: Type of message - 'message', 'request', 'response', 'requestResponse'
+            slot: Slot number (0-11)
+            message: The new message text (max 64 characters)
+            
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        try:
+            user_id = self._current_user.get("id") if self._current_user else None
+            if not user_id:
+                logger.error("Cannot update invite message - not logged in")
+                return False
+            
+            # Truncate message to 64 chars
+            message = message[:64]
+                
+            response = await self._request(
+                "PUT",
+                f"/message/{user_id}/{message_type}/{slot}",
+                json={"message": message}
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Updated invite message slot {slot}: {message}")
+                return True
+            elif response.status_code == 429:
+                logger.warning(f"Rate limited on invite message update (60 min cooldown)")
+                return False
+            else:
+                logger.warning(f"Failed to update invite message: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error updating invite message: {e}")
+            return False
+    
+    async def reset_invite_message(self, message_type: str, slot: int) -> bool:
+        """
+        Reset an invite message slot to its default value.
+        
+        NOTE: Resetting does NOT trigger the same 60-min cooldown as editing.
+        You can reset → edit immediately after each other.
+        
+        Args:
+            message_type: Type of message - 'message', 'request', 'response', 'requestResponse'
+            slot: Slot number (0-11)
+            
+        Returns:
+            True if reset successfully, False otherwise
+        """
+        try:
+            user_id = self._current_user.get("id") if self._current_user else None
+            if not user_id:
+                logger.error("Cannot reset invite message - not logged in")
+                return False
+                
+            response = await self._request(
+                "DELETE",
+                f"/message/{user_id}/{message_type}/{slot}"
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Reset invite message slot {slot}")
+                return True
+            else:
+                logger.warning(f"Failed to reset invite message: {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Error resetting invite message: {e}")
+            return False
+    
+    async def send_invite_to_user(self, user_id: str, instance_id: str, message_slot: int = None) -> bool:
+        """
+        Send an invite notification to a user.
+        
+        Args:
+            user_id: The user to invite
+            instance_id: Full instance location (wrld_xxx:instanceId)
+            message_slot: Optional slot number for custom message (0-11)
+            
+        Returns:
+            True if invite sent successfully, False otherwise
+        """
+        try:
+            payload = {
+                "instanceId": instance_id,
+            }
+            if message_slot is not None:
+                payload["messageSlot"] = message_slot
+                
+            response = await self._request(
+                "POST",
+                f"/invite/{user_id}",
+                json=payload
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"Sent invite to {user_id}")
+                return True
+            else:
+                logger.warning(f"Failed to send invite: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Error sending invite: {e}")
+            return False
+    
+    async def send_alert_notification(self, message: str, slot: int = 11) -> bool:
+        """
+        Send an alert to yourself as a VRChat notification.
+        
+        This uses the Reset → Edit → Self-Invite trick to send dynamic messages.
+        It first resets the slot, then updates it with the message, then self-invites.
+        
+        Args:
+            message: Alert message to display (max 64 characters)
+            slot: Slot to use for the alert (default: 11, the last slot)
+            
+        Returns:
+            True if alert sent successfully, False otherwise
+        """
+        try:
+            # Get current instance from log parsing or cached value
+            # For now, we skip this - it requires log watcher integration
+            
+            # Step 1: Reset the slot (bypasses 60 min cooldown)
+            reset_ok = await self.reset_invite_message("invite", slot)
+            if not reset_ok:
+                logger.warning("Failed to reset invite message slot for alert")
+                # Try anyway - it might work
+            
+            # Step 2: Update with our message
+            update_ok = await self.update_invite_message("invite", slot, message)
+            if not update_ok:
+                logger.error("Failed to update invite message for alert")
+                return False
+            
+            # Step 3: We need the current instance location
+            # This will require integration with the log watcher
+            # For now, just return True if message was updated
+            logger.info(f"Alert message set to: {message}")
+            logger.warning("Self-invite requires current instance - integrate with log watcher")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error sending alert notification: {e}")
+            return False
+

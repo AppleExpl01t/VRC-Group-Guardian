@@ -240,7 +240,8 @@ class LogWatcher:
                     "timestamp": ts_str,
                     "is_watchlisted": user_profile.get('is_watchlisted', False) if user_profile else False,
                     "sightings_count": user_profile.get('sightings_count', 1) if user_profile else 1,
-                    "note": user_profile.get('note') if user_profile else None
+                    "note": user_profile.get('note') if user_profile else None,
+                    "tags": user_profile.get('tags', []) if user_profile else [],
                 })
             return
 

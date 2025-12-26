@@ -17,6 +17,7 @@ class Colors:
     bg_deep: str = "#0d0d15"          # Deep space
     bg_base: str = "#12121a"          # Base background
     bg_elevated: str = "#1a1a25"      # Elevated surfaces
+    bg_elevated_2: str = "#222230"    # Slightly lighter elevated (hover/highlight)
     bg_glass: str = "rgba(30, 30, 45, 0.6)"  # Glass panels
     
     # Primary accent colors

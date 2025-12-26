@@ -60,13 +60,13 @@ class DashboardView(ft.Container):
             
         group_id = self.group.get("id")
         
-        # Fetch all data concurrently
+        # Fetch all data concurrently (using cached getters for efficiency)
         import asyncio
         results = await asyncio.gather(
-            self.api.get_group_instances(group_id),
-            self.api.get_group_join_requests(group_id),
-            self.api.get_group_audit_logs(group_id, n=10),
-            self.api.get_group_bans(group_id), # Check bans to count today's
+            self.api.get_cached_group_instances(group_id),
+            self.api.get_cached_join_requests(group_id),
+            self.api.get_group_audit_logs(group_id, n=10),  # Logs don't need caching (always fresh)
+            self.api.get_cached_group_bans(group_id),
         )
         
         self._instances = results[0] or []
@@ -162,6 +162,7 @@ class DashboardView(ft.Container):
                             icon=ft.Icons.REFRESH_ROUNDED,
                             tooltip="Refresh data",
                             on_click=lambda e: self.page.run_task(self._load_data),
+                            key="dashboard_refresh",
                         ),
                         IconButton(
                             icon=ft.Icons.NOTIFICATIONS_ROUNDED,
@@ -238,7 +239,8 @@ class DashboardView(ft.Container):
                             ft.TextButton(
                                 "View All →",
                                 style=ft.ButtonStyle(color=colors.accent_primary),
-                                on_click=lambda e: self.on_navigate("/instances") if self.on_navigate else None
+                                on_click=lambda e: self.on_navigate("/instances") if self.on_navigate else None,
+                                key="dashboard_view_instances",
                             ),
                         ],
                     ),

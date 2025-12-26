@@ -233,7 +233,8 @@ class GroupSelectionView(ft.View):
                 GroupCard(
                     g, 
                     on_select=self._on_group_select,
-                    is_active_group=(g.get('id') == self._current_group_id)
+                    is_active_group=(g.get('id') == self._current_group_id),
+                    key=f"group_card_{g.get('id')}"
                 ) for g in self._groups
             ]
             
@@ -273,6 +274,7 @@ class GroupSelectionView(ft.View):
                         bgcolor=colors.success,
                     ),
                     on_click=lambda e: self.page.go("/live"),
+                    key="live_monitor_btn"
                 ) if self._supports_live else ft.Container(),
                 ft.IconButton(
                     icon=ft.Icons.REFRESH_ROUNDED,
@@ -280,6 +282,7 @@ class GroupSelectionView(ft.View):
                     icon_color=colors.text_secondary,
                     on_click=self._on_refresh,
                     disabled=self._on_refresh is None,
+                    key="refresh_groups_btn"
                 ),
             ], spacing=spacing.md),
             padding=ft.padding.all(spacing.xl),
@@ -390,6 +393,7 @@ class GroupSelectionView(ft.View):
             icon_size=18,
             icon_color=colors.text_tertiary,
             tooltip="Logout",
+            key="logout_btn",
             on_click=lambda e: self._on_logout() if self._on_logout else None,
             style=ft.ButtonStyle(
                 bgcolor={
@@ -502,7 +506,8 @@ class GroupSelectionView(ft.View):
                     GroupCard(
                         g, 
                         on_select=self._on_group_select,
-                        is_active_group=(g.get('id') == self._current_group_id)
+                        is_active_group=(g.get('id') == self._current_group_id),
+                        key=f"group_card_{g.get('id')}"
                     ) for g in groups
                 ])
             

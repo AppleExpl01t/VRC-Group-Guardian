@@ -1,18 +1,17 @@
-"""
-History / Database View
-=======================
-View and search persistent user history, join logs, and logs.
-Features ported from FCH-Toolkit DB.
-"""
-
 import flet as ft
 from datetime import datetime
 from ..theme import colors, radius, spacing, typography
-from ..components.glass_card import GlassCard
-from ..components.neon_button import NeonButton
+from ..components.user_card import UserCard
+from ..dialogs.user_details import show_user_details_dialog
 from services.database import get_database
 
 class HistoryView(ft.Container):
+    """
+    History / Database View
+    =======================
+    View and search persistent user history, join logs, and logs.
+    Features ported from FCH-Toolkit DB.
+    """
     def __init__(self, api=None, on_navigate=None, **kwargs):
         self.api = api
         self.on_navigate = on_navigate
@@ -23,7 +22,7 @@ class HistoryView(ft.Container):
         self._logs = []
         
         # Controls
-        self._content_area = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
+        self._content_area = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=spacing.sm)
         self._tabs = None
         
         content = self._build_view()
@@ -96,23 +95,20 @@ class HistoryView(ft.Container):
             ts = log.get("timestamp", "")
             loc = log.get("location", "")
             
-            # Format nicely
+            user_data = {"id": uid, "displayName": uname}
+            
+            # Subtitle with timestamp and location
+            sub = f"{ts} • {loc}" if loc else ts
+            
             items.append(
-                ft.Container(
-                    content=ft.Row([
-                        ft.Column([
-                            ft.Text(uname, weight="bold", color=colors.text_primary),
-                            ft.Text(ts, size=10, color=colors.text_tertiary),
-                        ], expand=True),
-                        ft.Column([
-                             ft.Text(loc, size=10, color=colors.text_secondary, no_wrap=True),
-                             ft.Text(uid, size=8, color=colors.text_tertiary, font_family="Consolas"),
-                        ], alignment="end"),
-                    ]),
-                    padding=spacing.sm,
-                    bgcolor=colors.bg_glass,
-                    border_radius=radius.sm,
-                    border=ft.border.only(bottom=ft.BorderSide(1, colors.glass_border))
+                UserCard(
+                    user_data=user_data,
+                    api=self.api,
+                    db=self._db,
+                    subtitle=sub,
+                    on_click=lambda e, u=user_data: show_user_details_dialog(
+                        self.page, u, self.api, self._db
+                    )
                 )
             )
         
@@ -123,13 +119,16 @@ class HistoryView(ft.Container):
         search_field = ft.TextField(
              prefix_icon=ft.Icons.SEARCH,
              hint_text="Search local user database...",
-             on_submit=self._do_search_users
+             on_submit=self._do_search_users,
+             border_radius=radius.md,
+             bgcolor=colors.bg_elevated
         )
         
-        self._user_list_col = ft.Column(scroll="auto", expand=True)
+        self._user_list_col = ft.Column(scroll="auto", expand=True, spacing=spacing.sm)
         
         self._content_area.controls = [
-            ft.Row([search_field], alignment="center"),
+            search_field,
+            ft.Container(height=spacing.sm),
             self._user_list_col
         ]
 
@@ -147,30 +146,36 @@ class HistoryView(ft.Container):
                 uname = u.get("username", "Unknown")
                 uid = u.get("user_id", "")
                 note = u.get("note") or ""
-                wl = u.get("is_watchlisted")
                 
-                # Check for note/watchlist markers
-                icons = []
-                if wl: icons.append(ft.Icon(ft.Icons.VISIBILITY, size=14, color=colors.accent_primary))
-                if note: icons.append(ft.Icon(ft.Icons.NOTE, size=14, color=colors.text_secondary))
+                # Construct user data from DB record 
+                # DB keys might differ slightly, standardized here
+                user_data = {
+                    "id": uid, 
+                    "displayName": uname,
+                }
                 
                 items.append(
-                    ft.Container(
-                        content=ft.Row([
-                            ft.Column([
-                                ft.Row([
-                                    ft.Text(uname, weight="bold", color=colors.text_primary),
-                                    *icons
-                                ], spacing=4),
-                                ft.Text(uid, size=10, color=colors.text_tertiary, font_family="Consolas"),
-                            ], expand=True),
-                            ft.Text(note[:50] + "..." if len(note) > 50 else note, size=11, color=colors.text_secondary, italic=True)
-                        ]),
-                        padding=spacing.sm,
-                        bgcolor=colors.bg_glass,
-                        border_radius=radius.sm,
-                        border=ft.border.only(bottom=ft.BorderSide(1, colors.glass_border))
+                    UserCard(
+                        user_data=user_data,
+                        api=self.api,
+                        db=self._db,
+                        subtitle=note if note else None,
+                        on_click=lambda e, u=user_data: self._show_details_and_refresh(u)
                     )
                 )
             self._user_list_col.controls = items
         self._user_list_col.update()
+
+    def _show_details_and_refresh(self, user_data):
+        """Show details and refresh list on close to reflect note changes"""
+        def on_update():
+            # Ideally we'd remember the search query. For now, we can just clear or keep basic.
+            pass
+            
+        show_user_details_dialog(
+            self.page, 
+            user_data, 
+            self.api, 
+            self._db,
+            on_update=on_update
+        )

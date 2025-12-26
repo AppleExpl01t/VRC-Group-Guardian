@@ -27,19 +27,11 @@ class TitleBar(ft.Container):
         self._update_url = None
         self._release_notes = None
         
-        # Pulsing animation for update indicator
-        self._pulse_animation = ft.AnimatedSwitcher(
-            duration=500,
-            reverse_duration=500,
-            switch_in_curve=ft.AnimationCurve.EASE_IN_OUT,
-            switch_out_curve=ft.AnimationCurve.EASE_IN_OUT,
-        )
-        
         # Version text - will pulse red when update available
         self._version_text = ft.Text(
             f"v{UpdateService.CURRENT_VERSION}",
             size=10,
-            color=colors.text_muted,
+            color=colors.text_tertiary,
             weight=ft.FontWeight.W_400,
         )
         
@@ -168,9 +160,12 @@ class TitleBar(ft.Container):
         self._version_container.animate_opacity = ft.Animation(800, ft.AnimationCurve.EASE_IN_OUT)
         
         if self.page:
-            self.page.update()
-            # Start pulse loop
-            self.page.run_task(self._pulse_loop)
+            try:
+                self.page.update()
+                # Start pulse loop
+                self.page.run_task(self._pulse_loop)
+            except:
+                pass
     
     async def _pulse_loop(self):
         """Animate pulsing effect for update indicator"""
@@ -220,7 +215,7 @@ class TitleBar(ft.Container):
             import asyncio
             await asyncio.sleep(3)
             self._version_text.value = f"v{UpdateService.CURRENT_VERSION}"
-            self._version_text.color = colors.text_muted
+            self._version_text.color = colors.text_tertiary
             if self.page:
                 self.page.update()
     

@@ -1,12 +1,13 @@
-
 import flet as ft
 from ..theme import colors, radius, spacing, typography
-from ..components.glass_card import GlassPanel, GlassCard
 from ..components.neon_button import IconButton
+from ..components.user_card import UserCard
+from ..dialogs.user_details import show_user_details_dialog
+from services.database import get_database
 
 class RequestsView(ft.Container):
     """
-    View for managing group join requests.
+    View for managing group join requests using Unified UserCard.
     """
     def __init__(self, group=None, api=None, on_navigate=None, on_update_stats=None, **kwargs):
         self.group = group
@@ -15,6 +16,7 @@ class RequestsView(ft.Container):
         self.on_update_stats = on_update_stats
         self._requests = []
         self._loading = True
+        self.db = get_database()
         
         # Content list
         self._content_area = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True, spacing=spacing.sm)
@@ -68,15 +70,20 @@ class RequestsView(ft.Container):
         self._loading = True
         self._update_view()
             
-        group_id = self.group.get("id")
-        self._requests = await self.api.get_group_join_requests(group_id)
-        
-        # Notify parent app
-        if self.on_update_stats:
-            self.on_update_stats({"pending_requests": len(self._requests)})
-        
-        self._loading = False
-        self._update_view()
+        try:
+            group_id = self.group.get("id")
+            self._requests = await self.api.get_cached_join_requests(group_id)
+            
+            # Notify parent app
+            if self.on_update_stats:
+                self.on_update_stats({"pending_requests": len(self._requests)})
+        except Exception as e:
+            print(f"Error loading requests: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self._loading = False
+            self._update_view()
         
     def _update_view(self):
         self._content_area.controls = self._get_content_controls()
@@ -112,145 +119,56 @@ class RequestsView(ft.Container):
 
     def _build_request_item(self, req):
         user = req.get("user", {})
-        user_id = user.get("id")
-        user_name = user.get("displayName", "Unknown User")
         
-        # Correctly prioritize image sources
-        icon = (
-            user.get("userIcon") or 
-            user.get("profilePicOverride") or 
-            user.get("currentAvatarThumbnailImageUrl") or
-            user.get("imageUrl")
-        )
-        
-        # Check for Age Verification - Note: This data may not be available in limited API response
-        # Will be properly checked when viewing full user details
-        
-        bio = user.get("bio", "No biography provided.")
-        
-        bio_text = ft.Text(bio, size=typography.size_sm, color=colors.text_secondary)
-        
-        # Expansion state tracking using a custom data attribute on the bio container
-        bio_container = ft.Container(
-            content=ft.Column([
-                ft.Divider(color=colors.glass_border, height=1),
-                ft.Text("Biography", size=typography.size_xs, color=colors.text_tertiary, weight=ft.FontWeight.BOLD),
-                bio_text,
-            ], spacing=spacing.xs),
-            visible=False, # Hidden by default
-            padding=ft.padding.only(top=spacing.sm),
-            animate_opacity=200,
-        )
-        
-        avatar_image = ft.Image(src=icon, fit=ft.ImageFit.COVER) if icon else ft.Icon(ft.Icons.PERSON, color=colors.text_secondary)
-
-        # Eager load PFP if page is mounted
-        if hasattr(self, "page") and self.page:
-            async def load_pfp():
-                path = await self.api.cache_user_image(user)
-                if path and path != avatar_image.src:
-                    avatar_image.src = path
-                    avatar_image.update()
-            self.page.run_task(load_pfp)
-
-        def toggle_bio(e):
-            bio_container.visible = not bio_container.visible
-            e.control.icon = ft.Icons.KEYBOARD_ARROW_UP_ROUNDED if bio_container.visible else ft.Icons.KEYBOARD_ARROW_DOWN_ROUNDED
-            
-            # Lazy load bio if not already loaded (and if it's currently placeholder)
-            if bio_container.visible and bio_text.value == "No biography provided.":
-                bio_text.value = "Loading biography..."
-                bio_text.update()
-                
-                async def fetch_details():
-                    await self._fetch_full_user_details(user_id, bio_text, avatar_image)
-                    
-                self.page.run_task(fetch_details)
-                
-            self.update()
-
-        # Name row (simple, without age badge since API doesn't provide it)
-        name_controls = [
-            ft.Text(user_name, weight=ft.FontWeight.BOLD, color=colors.text_primary, size=typography.size_base),
-        ]
-
-        async def reject_req():
+        async def reject_req(e):
             await self._handle_action(req, "Reject")
             
-        async def accept_req():
+        async def accept_req(e):
             await self._handle_action(req, "Accept")
+            
+        def show_ban(e):
+             # Reuse dialog service's ban logic if possible, or simple confirmation here
+             from ..dialogs.user_details import show_user_details_dialog
+             # Open details with ban active? Custom ban dialog is simpler for strict "Request" context
+             self._show_ban_dialog(req)
 
-        return GlassCard(
-            content=ft.Column([
-                ft.Row([
-                    # Avatar
-                    ft.Container(
-                        content=avatar_image,
-                        width=48, height=48, border_radius=24, clip_behavior=ft.ClipBehavior.HARD_EDGE,
-                        bgcolor=colors.bg_elevated,
-                        on_click=toggle_bio # Clicking avatar also toggles
-                    ),
-                    
-                    # Info (Name + Badges)
-                    ft.Container(
-                        content=ft.Column([
-                            ft.Row(name_controls, spacing=0),
-                            ft.Text("Tap to view details", size=typography.size_xs, color=colors.text_tertiary),
-                        ], spacing=2, alignment=ft.MainAxisAlignment.CENTER),
-                        expand=True,
-                        on_click=toggle_bio, # Clicking area toggles
-                        padding=ft.padding.only(left=spacing.sm)
-                    ),
-                    
-                    # Actions
-                    ft.Row([
-                        IconButton(
-                            icon=ft.Icons.BLOCK_ROUNDED,
-                            icon_color=colors.danger,
-                            tooltip="Ban User",
-                            on_click=lambda e: self._show_ban_dialog(req)
-                        ),
-                        ft.Container(width=spacing.xs),
-                        IconButton(
-                            icon=ft.Icons.CLOSE_ROUNDED,
-                            icon_color=colors.warning,
-                            tooltip="Reject",
-                            on_click=lambda e: self.page.run_task(reject_req)
-                        ),
-                        ft.Container(width=spacing.xs),
-                        IconButton(
-                            icon=ft.Icons.CHECK_ROUNDED,
-                            icon_color=colors.success,
-                            tooltip="Accept",
-                            on_click=lambda e: self.page.run_task(accept_req)
-                        ),
-                    ])
-                ], alignment=ft.MainAxisAlignment.START),
-                
-                # Expandable Bio
-                bio_container
-            ]),
-            padding=spacing.md,
-            animate_size=200, # Smooth height animation
+        # Actions
+        actions = [
+            IconButton(
+                icon=ft.Icons.BLOCK_ROUNDED,
+                icon_color=colors.danger,
+                tooltip="Ban User",
+                on_click=show_ban
+            ),
+            ft.Container(width=spacing.xs),
+            IconButton(
+                icon=ft.Icons.CLOSE_ROUNDED,
+                icon_color=colors.warning,
+                tooltip="Reject",
+                on_click=lambda e: self.page.run_task(reject_req)
+            ),
+            ft.Container(width=spacing.xs),
+            IconButton(
+                icon=ft.Icons.CHECK_ROUNDED,
+                icon_color=colors.success,
+                tooltip="Accept",
+                on_click=lambda e: self.page.run_task(accept_req)
+            ),
+        ]
+
+        return UserCard(
+            user_data=user,
+            api=self.api,
+            db=self.db,
+            trailing_controls=actions,
+            on_click=lambda e: show_user_details_dialog(
+                self.page, 
+                user, 
+                self.api, 
+                self.db, 
+                group_id=self.group.get("id")
+            )
         )
-
-    async def _fetch_full_user_details(self, user_id, bio_text_control, avatar_image_control):
-        """Fetch full user bio and update UI"""
-        user_data = await self.api.get_user(user_id)
-        if user_data:
-            bio = user_data.get("bio", "").strip() or "User has no biography."
-            bio_text_control.value = bio
-            bio_text_control.update()
-            
-            # Cache the image locally for better reliability
-            local_path = await self.api.cache_user_image(user_data)
-            
-            if local_path and local_path != avatar_image_control.src:
-                avatar_image_control.src = local_path
-                avatar_image_control.update()
-        else:
-            bio_text_control.value = "Failed to load biography."
-            bio_text_control.update()
 
     def _show_ban_dialog(self, req):
         """Show confirmation dialog for banning a user"""
@@ -263,10 +181,8 @@ class RequestsView(ft.Container):
             
         def confirm_ban(e):
             self.page.close(dlg)
-            
             async def do_ban():
                 await self._confirm_ban_action(req)
-                
             self.page.run_task(do_ban)
 
         dlg = ft.AlertDialog(
@@ -279,15 +195,12 @@ class RequestsView(ft.Container):
             ],
             actions_alignment=ft.MainAxisAlignment.END,
             bgcolor=colors.bg_elevated,
-            shape=ft.RoundedRectangleBorder(radius=radius.lg),
         )
-        
         self.page.open(dlg)
 
     async def _confirm_ban_action(self, req):
         """Execute the ban and reject request"""
         group_id = self.group.get("id")
-        req_id = req.get("id")
         user = req.get("user", {})
         user_id = user.get("id")
         
@@ -295,24 +208,23 @@ class RequestsView(ft.Container):
         ban_success = await self.api.ban_user(group_id, user_id)
         
         if ban_success:
+            # Invalidate caches since we modified data
+            self.api.invalidate_join_requests_cache(group_id)
+            self.api.invalidate_bans_cache(group_id)
+            
             self.page.open(ft.SnackBar(content=ft.Text("User banned successfully"), bgcolor=colors.success))
             
             # 2. Reject the request (cleanup)
-            # Optimistically remove from UI
             self._requests = [r for r in self._requests if r.get("id") != req.get("id")]
             self._update_view()
             
-            # Update stats badge
             if self.on_update_stats:
                 self.on_update_stats({"pending_requests": len(self._requests)})
-            
-            # await self.api.handle_join_request(group_id, user_id, "reject")
         else:
             self.page.open(ft.SnackBar(content=ft.Text("Failed to ban user"), bgcolor=colors.danger))
 
     async def _handle_action(self, req, action):
         group_id = self.group.get("id")
-        req_id = req.get("id")
         user = req.get("user", {})
         user_id = user.get("id")
         
@@ -334,6 +246,12 @@ class RequestsView(ft.Container):
             # Show snackbar
             self.page.open(ft.SnackBar(content=ft.Text(f"Failed to {action} request")))
         else:
+            # Invalidate cache since we modified data
+            self.api.invalidate_join_requests_cache(group_id)
+            if action == "Accept":
+                self.api.invalidate_members_cache(group_id)  # New member added
+            
             msg = f"Accepted {user.get('displayName')}" if action == "Accept" else f"Rejected {user.get('displayName')}"
             self.page.open(ft.SnackBar(content=ft.Text(msg), bgcolor=colors.success_dim if action == "Accept" else colors.danger_dim))
+
 

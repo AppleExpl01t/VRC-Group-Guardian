@@ -11,6 +11,7 @@ import flet as ft
 from ..theme import colors, radius, spacing, typography
 from ..components.glass_card import GlassCard, GlassPanel
 from ..components.neon_button import NeonButton
+from ..components.user_card import UserCard
 from services.log_watcher import get_log_watcher
 from services.database import get_database
 
@@ -165,83 +166,51 @@ class LiveInstanceView(ft.Container):
             self._leave_list.update()
             
     def _add_watchlist_event(self, msg: str, color: str, ts: str):
-        """Add critical event"""
-        pass 
-
-    def _create_log_row(self, name: str, action: str, color: str, ts: str):
-        return ft.Container(
+        """Add critical event to the join log with highlighting"""
+        entry = ft.Container(
             content=ft.Row([
                 ft.Text(ts, size=10, color=colors.text_tertiary),
-                ft.Icon(ft.Icons.CIRCLE, size=8, color=color),
-                ft.Text(f"{name}", weight=ft.FontWeight.BOLD, color=colors.text_primary, expand=True, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS),
+                ft.Icon(ft.Icons.WARNING_ROUNDED, size=12, color=color),
+                ft.Text(msg, weight=ft.FontWeight.BOLD, color=color, expand=True, no_wrap=True, overflow=ft.TextOverflow.ELLIPSIS),
             ], spacing=spacing.xs),
-            padding=ft.padding.symmetric(vertical=2)
+            padding=ft.padding.all(4),
+            bgcolor=colors.with_opacity(color, 0.1),
+            border_radius=radius.sm,
+            border=ft.border.left(2, color)
         )
+        # Add to joins list so it's visible in the main log stream
+        self._joins.insert(0, entry)
+        if len(self._joins) > 50: self._joins.pop()
+        if self._join_list:
+            self._join_list.controls = self._joins[:]
+            self._join_list.update()
 
     def _update_player_list(self):
-        """Rebuild player list UI"""
+        """Rebuild player list UI using Unified UserCard"""
         if not self._player_list:
             return
             
         items = []
         for uid, name in self._players.items():
-            wl_entry = self._watchlist_cache.get(uid)
+            # Construct ephemeral user object
+            user_data = {
+                "id": uid,
+                "displayName": name,
+            }
+            
+            # Check for avatar (from log watcher)
             avatar_name = self._avatars.get(uid)
             
-            bg_color = colors.bg_glass
-            border_color = "transparent"
-            
-            is_watchlisted = wl_entry and wl_entry.get("is_watchlisted")
-            has_note = wl_entry and wl_entry.get("note")
-            
-            if is_watchlisted:
-                bg_color = colors.bg_elevated_2
-                border_color = colors.accent_primary
-            elif has_note:
-                border_color = colors.success
-                
-            card = ft.Container(
-                content=ft.Row(
-                    controls=[
-                        # Watchlist Indicator
-                        ft.Icon(
-                            ft.Icons.VISIBILITY_ROUNDED if is_watchlisted else ft.Icons.PERSON_ROUNDED, 
-                            size=16, 
-                            color=colors.accent_primary if is_watchlisted else colors.text_secondary
-                        ),
-                        
-                        # Name & Avatar
-                        ft.Column(
-                            controls=[
-                                ft.Row([
-                                    ft.Text(name, color=colors.text_primary, weight=ft.FontWeight.W_500, no_wrap=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS),
-                                    *([ft.Icon(ft.Icons.NOTE, size=12, color=colors.text_tertiary)] if has_note else [])
-                                ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                                
-                                *([ft.Text(avatar_name, size=10, color=colors.text_tertiary, no_wrap=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)] if avatar_name else [])
-                            ],
-                            spacing=0,
-                            expand=True,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                        ),
-                        
-                        # Actions
-                        ft.IconButton(
-                            icon=ft.Icons.EDIT_NOTE_ROUNDED,
-                            icon_size=16,
-                            tooltip="Edit Note",
-                            on_click=lambda e, u=uid, n=name: self._open_note_dialog(u, n)
-                        ),
-                    ],
-                    spacing=spacing.sm,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER
-                ),
-                padding=spacing.sm,
-                bgcolor=bg_color,
-                border_radius=radius.sm,
-                border=ft.border.all(1, border_color) if (is_watchlisted or has_note) else ft.border.only(bottom=ft.BorderSide(1, colors.glass_border))
+            items.append(
+                UserCard(
+                    user_data=user_data,
+                    api=self.api,
+                    db=self._db,
+                    compact=True,
+                    subtitle=avatar_name if avatar_name else None,
+                    on_click=lambda e, u=user_data: self._open_details(u),
+                )
             )
-            items.append(card)
             
         if not items:
             items.append(ft.Container(content=ft.Text("No active players", color=colors.text_secondary, italic=True), padding=10))
@@ -249,61 +218,24 @@ class LiveInstanceView(ft.Container):
         self._player_list.controls = items
         self._player_list.update()
 
-    def _open_note_dialog(self, user_id: str, display_name: str):
-        """Open dialog to edit user note and watchlist status"""
-        user_data = self._db.get_user_data(user_id) or {}
+    def _open_details(self, user_data):
+        """Open unified details dialog"""
+        from ..dialogs.user_details import show_user_details_dialog
         
-        note_field = ft.TextField(
-            label="Note",
-            value=user_data.get("note", ""),
-            multiline=True,
-            max_lines=4,
-            border_color=colors.outline,
-        )
-        
-        wl_switch = ft.Switch(
-            label="Add to Watchlist",
-            value=bool(user_data.get("is_watchlisted")),
-            active_color=colors.accent_primary
-        )
-        
-        def save(e):
-            val = note_field.value.strip()
-            # Update DB
-            self._db.set_user_note(user_id, val)
-            self._db.toggle_watchlist(user_id, wl_switch.value)
-            
-            # Update cache
-            self._watchlist_cache[user_id] = {
-                "note": val,
-                "is_watchlisted": wl_switch.value
-            }
-            
-            self.page.close_dialog()
+        # We might need to refresh the list if they update a note/watchlist legacy
+        def on_update():
+            # Refresh local cache from DB
+            self._refresh_watchlist_cache()
+            # Rebuild UI to show new icons
             self._update_player_list()
-            self.page.snack_bar = ft.SnackBar(content=ft.Text(f"Updated {display_name}"), bgcolor=colors.success)
-            self.page.snack_bar.open = True
-            self.page.update()
-
-        dlg = ft.AlertDialog(
-            title=ft.Text(f"Manage User: {display_name}"),
-            content=ft.Column([
-                ft.Text(f"ID: {user_id}", size=10, color=colors.text_tertiary, font_family="Consolas"),
-                ft.Divider(height=10, color="transparent"),
-                wl_switch,
-                ft.Divider(height=10, color="transparent"),
-                note_field,
-            ], tight=True, width=400),
-            actions=[
-                ft.TextButton("Cancel", on_click=lambda e: self.page.close_dialog()),
-                NeonButton("Save Changes", on_click=save, variant="primary"),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_elevated,
+            
+        show_user_details_dialog(
+            self.page,
+            user_data,
+            self.api,
+            self._db,
+            on_update=on_update
         )
-        self.page.dialog = dlg
-        dlg.open = True
-        self.page.update()
 
     def _update_header(self):
         """Update header info"""

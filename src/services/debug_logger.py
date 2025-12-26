@@ -148,7 +148,7 @@ class DebugLogger:
         
         # Console handler (less verbose)
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.DEBUG)
         console_handler.addFilter(PIIFilter())
         console_format = logging.Formatter('%(levelname)s | %(name)s | %(message)s')
         console_handler.setFormatter(console_format)

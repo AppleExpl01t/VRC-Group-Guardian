@@ -262,6 +262,7 @@ class Sidebar(ft.Container):
                 {"icon": ft.Icons.PEOPLE_ROUNDED, "label": "Members", "route": "/members"},
                 {"icon": ft.Icons.BLOCK_ROUNDED, "label": "Bans", "route": "/bans"},
                 {"icon": ft.Icons.HISTORY_ROUNDED, "label": "History", "route": "/history"},
+                {"icon": ft.Icons.VISIBILITY_ROUNDED, "label": "Watchlist", "route": "/watchlist"},
             ]
         
         nav_controls = []

@@ -36,7 +36,7 @@ class UpdateDialog(ft.AlertDialog):
         
         self.download_btn = ft.ElevatedButton(
             "Download Update",
-            icon=ft.icons.DOWNLOAD,
+            icon=ft.Icons.DOWNLOAD,
             on_click=self._on_download,
             style=ft.ButtonStyle(
                 bgcolor=COLORS["accent_primary"],
@@ -54,7 +54,7 @@ class UpdateDialog(ft.AlertDialog):
             modal=True,
             title=ft.Row(
                 [
-                    ft.Icon(ft.icons.SYSTEM_UPDATE, color=COLORS["success"], size=28),
+                    ft.Icon(ft.Icons.SYSTEM_UPDATE, color=COLORS["success"], size=28),
                     ft.Text(
                         "Update Available!",
                         size=20,
@@ -160,9 +160,8 @@ class UpdateDialog(ft.AlertDialog):
     
     def _on_close(self, e):
         """Close the dialog."""
-        self.open = False
         if self.page:
-            self.page.update()
+            self.page.close(self)
         if self.on_close_callback:
             self.on_close_callback()
 
@@ -170,7 +169,5 @@ class UpdateDialog(ft.AlertDialog):
 def show_update_dialog(page: ft.Page, version_tag: str, asset_url: str, release_notes: str = None):
     """Show the update available dialog."""
     dialog = UpdateDialog(version_tag, asset_url, release_notes)
-    page.dialog = dialog
-    dialog.open = True
-    page.update()
+    page.open(dialog)  # Use modern Flet API
     return dialog
