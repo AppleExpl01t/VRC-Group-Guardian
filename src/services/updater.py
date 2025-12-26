@@ -48,11 +48,17 @@ class UpdateService:
                 logger.warning(f"Could not resolve SHA for tag {latest_tag}")
                 return False, None, None, None
 
-            logger.info(f"Checking Update: Local SHA={UpdateService.CURRENT_COMMIT_SHA[:7]} vs Remote SHA={remote_sha[:7]}")
-
             # 3. Compare SHAs
-            if remote_sha != UpdateService.CURRENT_COMMIT_SHA:
-                return True, latest_tag, asset_url, body
+            local_sha = UpdateService.CURRENT_COMMIT_SHA.strip()
+            remote_sha = remote_sha.strip()
+            
+            logger.info(f"Checking Update: Local SHA={local_sha[:7]} vs Remote SHA={remote_sha[:7]}")
+
+            if remote_sha != local_sha:
+                # Return debug info in body or separate field? 
+                # For now, let's append to body if it exists, or just print it.
+                debug_info = f"\n\n(Debug: Local {local_sha[:7]} != Remote {remote_sha[:7]})"
+                return True, latest_tag, asset_url, (body or "") + debug_info
                     
             return False, None, None, None
             
