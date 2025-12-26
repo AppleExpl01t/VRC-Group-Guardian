@@ -14,13 +14,15 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
+from utils.paths import get_database_path
 
 logger = logging.getLogger(__name__)
 
 class DatabaseService:
-    def __init__(self, db_path: str = "data/guardian.db"):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(exist_ok=True)
+    def __init__(self, db_path: str = None):
+        # Use centralized path utility for EXE-relative path
+        self.db_path = Path(db_path) if db_path else get_database_path()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:

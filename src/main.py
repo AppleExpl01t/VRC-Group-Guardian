@@ -483,7 +483,7 @@ class GroupGuardianApp:
         # Fetch groups async if empty
         if not self._groups:
              print("Groups empty or not loaded, triggering fetch...")
-             self.page.run_task(lambda: self._load_groups(force_refresh=True))
+             self.page.run_task(self._load_groups, force_refresh=True)
     
     async def _handle_refresh_groups(self, e=None):
         """Force refresh groups"""
@@ -547,20 +547,28 @@ class GroupGuardianApp:
     
     def _handle_logout(self):
         """Handle logout"""
+        # Prevent multiple logout calls
+        if getattr(self, '_logout_in_progress', False):
+            return
+        self._logout_in_progress = True
+        
         async def do_logout():
-            await self._api.logout()
-            
-            # Reset to real API client (exits Demo Mode)
-            self._api = VRChatAPI()
-            
-            self._is_authenticated = False
-            self._current_group = None
-            self._groups = []
-            self._username = ""
-            self._welcome_view = None # Clear stale view reference
-            self._live_view = None # Clear stale live view reference
-            print("Logged out")
-            self.page.go("/login")
+            try:
+                await self._api.logout()
+                
+                # Reset to real API client (exits Demo Mode)
+                self._api = VRChatAPI()
+                
+                self._is_authenticated = False
+                self._current_group = None
+                self._groups = []
+                self._username = ""
+                self._welcome_view = None # Clear stale view reference
+                self._live_view = None # Clear stale live view reference
+                print("Logged out")
+                self.page.go("/login")
+            finally:
+                self._logout_in_progress = False
         
         self.page.run_task(do_logout)
     

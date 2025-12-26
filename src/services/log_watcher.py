@@ -65,6 +65,10 @@ class LogWatcher:
         
         # Backfill state
         self._is_backfilling = False
+        
+        # Error throttling - prevent log spam
+        self._last_db_error_time: float = 0
+        self._db_error_logged = False
 
     def add_listener(self, callback: Callable[[Dict[str, Any]], None]):
         if callback not in self._listeners:
@@ -132,7 +136,11 @@ class LogWatcher:
                 return final_pos
                 
         except Exception as e:
-            logger.error(f"Backfill error: {e}")
+            # Throttle error logging
+            current_time = time.time()
+            if current_time - self._last_db_error_time > 60:
+                logger.error(f"Backfill error: {e}")
+                self._last_db_error_time = current_time
             return 0
         finally:
             self._is_backfilling = False
@@ -185,7 +193,11 @@ class LogWatcher:
                                 self._process_line(line, is_backfill=False)
             
             except Exception as e:
-                logger.error(f"Watch loop error: {e}")
+                # Throttle error logging - only log once per 60 seconds
+                current_time = time.time()
+                if current_time - self._last_db_error_time > 60:
+                    logger.error(f"Watch loop error: {e}")
+                    self._last_db_error_time = current_time
                 time.sleep(1)
             
             time.sleep(0.5)

@@ -11,6 +11,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from services.debug_logger import get_logger, log_request
+from utils.paths import get_cookies_path, get_api_cache_path, get_image_cache_dir
 
 logger = get_logger("api.client")
 
@@ -36,8 +37,9 @@ class VRChatAPI:
     MAX_RETRIES = 5
     BASE_BACKOFF_DELAY = 1.0  # seconds
     
-    def __init__(self, cookies_path: str = "cookies.json"):
-        self._cookies_path = Path(cookies_path)
+    def __init__(self, cookies_path: str = None):
+        # Use centralized path utilities for proper EXE-relative paths
+        self._cookies_path = Path(cookies_path) if cookies_path else get_cookies_path()
         self._client: Optional[httpx.AsyncClient] = None
         self._last_request_time: Optional[datetime] = None
         self._min_request_interval = 0.1  # 100ms minimum spacing between requests
@@ -55,8 +57,8 @@ class VRChatAPI:
         self._api_blocked = asyncio.Event()
         self._api_blocked.set()  # Not blocked initially
         
-        # Caching
-        self._cache_file = Path("api_cache.json")
+        # Caching - use centralized path
+        self._cache_file = get_api_cache_path()
         self._cache = self._load_api_cache()
     
     async def _get_client(self) -> httpx.AsyncClient:
@@ -620,8 +622,8 @@ class VRChatAPI:
         if not url:
             return None
         
-        cache_dir = Path("image_cache")
-        cache_dir.mkdir(exist_ok=True)
+        # Use centralized path utility for EXE-relative path
+        cache_dir = get_image_cache_dir()
         
         # Determine file extension from URL or default to png
         ext = "png"
