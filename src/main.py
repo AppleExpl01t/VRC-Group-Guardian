@@ -113,6 +113,10 @@ class GroupGuardianApp:
         self._pipeline = get_pipeline()
         self._pipeline_connected = False
         
+        # Update State
+        self._update_available = False
+        self._update_info = None  # (version, url, notes)
+        
         # Setup theme
         setup_theme(page)
         
@@ -156,13 +160,15 @@ class GroupGuardianApp:
             # Show setup dialog - will call _on_data_folder_configured when done
             show_data_folder_setup(page, on_complete=self._on_data_folder_configured)
         else:
-            # Already configured, proceed with session check
+            # Already configured, proceed with startup steps
+            self.page.run_task(self._check_for_updates)
             self.page.run_task(self._check_existing_session)
     
     def _on_data_folder_configured(self, path: str):
         """Called when user completes data folder setup."""
         logger.info(f"Data folder configured: {path}")
-        # Now proceed with session check
+        # Now proceed with startup steps
+        self.page.run_task(self._check_for_updates)
         self.page.run_task(self._check_existing_session)
     
     async def _check_existing_session(self):
@@ -194,9 +200,36 @@ class GroupGuardianApp:
 
                 print("No valid session or credentials")
                 self._show_login()
+                self._show_login()
         except Exception as e:
             print(f"Session check error: {e}")
             self._show_login()
+            
+    async def _check_for_updates(self):
+        """Check for updates in background"""
+        try:
+            is_available, version, url, notes = await UpdateService.check_for_updates()
+            if is_available:
+                logger.info(f"Update available: {version}")
+                self._update_available = True
+                self._update_info = (version, url, notes)
+                
+                # Update current view's title bar if possible
+                if self.page.views:
+                    try:
+                        current_view = self.page.views[-1]
+                        # Structure: View -> [Column] -> [TitleBar, Container]
+                        if current_view.controls and isinstance(current_view.controls[0], ft.Column):
+                            root_col = current_view.controls[0]
+                            if root_col.controls and isinstance(root_col.controls[0], TitleBar):
+                                title_bar = root_col.controls[0]
+                                title_bar.set_update_available(version, url, notes)
+                    except Exception as e:
+                        logger.debug(f"Could not update title bar live: {e}")
+                
+                self.page.update()
+        except Exception as e:
+            logger.error(f"Update check failed: {e}")
     
     def _create_view_with_titlebar(self, content: ft.Control, keep_view_ref=None) -> ft.View:
         """Create a view with custom title bar
@@ -222,12 +255,18 @@ class GroupGuardianApp:
         if isinstance(content, ft.View) and content.route:
             route = content.route
             
+        # Create TitleBar with update info if available
+        title_bar = TitleBar(title="Group Guardian", icon_path=self._icon_path)
+        if self._update_available and self._update_info:
+            version, url, notes = self._update_info
+            title_bar.set_update_available(version, url, notes)
+            
         return ft.View(
             route,
             controls=[
                 ft.Column(
                     controls=[
-                        TitleBar(title="Group Guardian", icon_path=self._icon_path),
+                        title_bar,
                         inner_content,
                     ],
                     spacing=0,

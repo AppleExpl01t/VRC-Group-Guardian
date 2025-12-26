@@ -1,15 +1,16 @@
 """
 Custom Title Bar Component
 ===========================
-Themed window controls for frameless window
+Themed window controls for frameless window with version display
 """
 
 import flet as ft
 from ..theme import colors, spacing, typography, radius
+from services.updater import UpdateService
 
 
 class TitleBar(ft.Container):
-    """Custom title bar with themed window controls"""
+    """Custom title bar with themed window controls and version indicator"""
     
     def __init__(
         self,
@@ -19,6 +20,37 @@ class TitleBar(ft.Container):
     ):
         self._title = title
         self._icon_path = icon_path
+        
+        # Update state
+        self._update_available = False
+        self._update_version = None
+        self._update_url = None
+        self._release_notes = None
+        
+        # Pulsing animation for update indicator
+        self._pulse_animation = ft.AnimatedSwitcher(
+            duration=500,
+            reverse_duration=500,
+            switch_in_curve=ft.AnimationCurve.EASE_IN_OUT,
+            switch_out_curve=ft.AnimationCurve.EASE_IN_OUT,
+        )
+        
+        # Version text - will pulse red when update available
+        self._version_text = ft.Text(
+            f"v{UpdateService.CURRENT_VERSION}",
+            size=10,
+            color=colors.text_muted,
+            weight=ft.FontWeight.W_400,
+        )
+        
+        # Version container (clickable when update available)
+        self._version_container = ft.Container(
+            content=self._version_text,
+            padding=ft.padding.symmetric(horizontal=8, vertical=2),
+            border_radius=radius.sm,
+            on_click=self._on_version_click,
+            tooltip="Click to check for updates",
+        )
         
         content = self._build_title_bar()
         
@@ -33,13 +65,20 @@ class TitleBar(ft.Container):
     def _build_title_bar(self) -> ft.Control:
         """Build the title bar content"""
         
-        # App title only (left side) - also acts as drag area
+        # App title with version
         title_section = ft.Container(
-            content=ft.Text(
-                self._title,
-                size=typography.size_sm,
-                weight=ft.FontWeight.W_500,
-                color=colors.text_secondary,
+            content=ft.Row(
+                [
+                    ft.Text(
+                        self._title,
+                        size=typography.size_sm,
+                        weight=ft.FontWeight.W_500,
+                        color=colors.text_secondary,
+                    ),
+                    self._version_container,
+                ],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             expand=True,
         )
@@ -107,6 +146,83 @@ class TitleBar(ft.Container):
             ),
             expand=True,
         )
+    
+    def set_update_available(self, version: str, url: str, notes: str = None):
+        """Mark that an update is available - triggers pulsing red version"""
+        self._update_available = True
+        self._update_version = version
+        self._update_url = url
+        self._release_notes = notes
+        
+        # Update version text with pulsing red style
+        self._version_text.value = f"v{UpdateService.CURRENT_VERSION} → {version}"
+        self._version_text.color = colors.danger
+        self._version_text.weight = ft.FontWeight.BOLD
+        
+        # Add pulsing border and background
+        self._version_container.bgcolor = ft.colors.with_opacity(0.15, colors.danger)
+        self._version_container.border = ft.border.all(1, colors.danger)
+        self._version_container.tooltip = f"Update available! Click to download {version}"
+        
+        # Start pulsing animation
+        self._version_container.animate_opacity = ft.Animation(800, ft.AnimationCurve.EASE_IN_OUT)
+        
+        if self.page:
+            self.page.update()
+            # Start pulse loop
+            self.page.run_task(self._pulse_loop)
+    
+    async def _pulse_loop(self):
+        """Animate pulsing effect for update indicator"""
+        import asyncio
+        while self._update_available and self.page:
+            self._version_container.opacity = 0.6
+            self._version_container.update()
+            await asyncio.sleep(0.8)
+            if not self._update_available:
+                break
+            self._version_container.opacity = 1.0
+            self._version_container.update()
+            await asyncio.sleep(0.8)
+    
+    def _on_version_click(self, e):
+        """Handle click on version - show update dialog if available"""
+        if self._update_available and self.page:
+            from ui.dialogs.update_dialog import show_update_dialog
+            show_update_dialog(
+                self.page,
+                self._update_version,
+                self._update_url,
+                self._release_notes
+            )
+        else:
+            # Check for updates manually
+            if self.page:
+                self.page.run_task(self._check_updates)
+    
+    async def _check_updates(self):
+        """Manually check for updates"""
+        self._version_text.value = "Checking..."
+        if self.page:
+            self.page.update()
+        
+        is_available, version, url, notes = await UpdateService.check_for_updates()
+        
+        if is_available:
+            self.set_update_available(version, url, notes)
+        else:
+            self._version_text.value = f"v{UpdateService.CURRENT_VERSION} ✓"
+            self._version_text.color = colors.success
+            if self.page:
+                self.page.update()
+                
+            # Reset after 3 seconds
+            import asyncio
+            await asyncio.sleep(3)
+            self._version_text.value = f"v{UpdateService.CURRENT_VERSION}"
+            self._version_text.color = colors.text_muted
+            if self.page:
+                self.page.update()
     
     def _minimize_window(self, e):
         """Minimize the window"""
