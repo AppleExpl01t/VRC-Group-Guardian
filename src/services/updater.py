@@ -5,17 +5,14 @@ from packaging import version
 
 logger = logging.getLogger(__name__)
 
-from datetime import datetime
-
 class UpdateService:
     GITHUB_REPO = "AppleExpl01t/VRC-Group-Guardian"
-    CURRENT_VERSION = "1.0.0" 
-    CURRENT_BUILD_TIMESTAMP = 0 # Injected during build (Unix Config)
+    CURRENT_VERSION = "1.0.0"  # Bumped automatically by AI during build
     
     @staticmethod
     async def check_for_updates():
         """
-        Check GitHub releases for a new version using TIMESTAMP.
+        Check GitHub releases for a new version using SEMANTIC VERSIONING.
         Returns (is_available, version_tag, asset_url, release_notes)
         """
         try:
@@ -25,12 +22,12 @@ class UpdateService:
                 response = await client.get(url, timeout=5.0)
                 
             if response.status_code != 200:
+                logger.error(f"Failed to fetch release: {response.status_code}")
                 return False, None, None, None
                 
             data = response.json()
             latest_tag = data.get("tag_name", "")
             body = data.get("body")
-            published_at_str = data.get("published_at") # ISO 8601
             
             # Find .exe asset
             assets = data.get("assets", [])
@@ -40,28 +37,24 @@ class UpdateService:
                     asset_url = asset["browser_download_url"]
                     break
             
-            if not asset_url or not published_at_str:
+            if not asset_url:
                 return False, None, None, None
 
-            # 2. Compare Timestamps
-            # Parse GitHub time (e.g. 2025-12-25T20:00:00Z)
-            # Simple manual parsing or use dateutil if available. 
-            # Trying standard concise parsing:
-            try:
-                # Handle 'Z' manually if python < 3.11 for fromisoformat
-                if published_at_str.endswith('Z'):
-                    published_at_str = published_at_str[:-1] + '+00:00'
-                remote_time = datetime.fromisoformat(published_at_str).timestamp()
-            except Exception as e:
-                logger.error(f"Time parsing failed: {e}")
-                return False, None, None, None
-
-            local_time = float(UpdateService.CURRENT_BUILD_TIMESTAMP)
+            # 2. Parse versions (strip leading 'v' or 'V')
+            remote_version_str = latest_tag.lstrip("vV")
+            local_version_str = UpdateService.CURRENT_VERSION
             
-            logger.info(f"Checking Update: Local Time={local_time} vs Remote Time={remote_time}")
+            try:
+                remote_ver = version.parse(remote_version_str)
+                local_ver = version.parse(local_version_str)
+            except Exception as e:
+                logger.error(f"Version parsing failed: {e}")
+                return False, None, None, None
+            
+            logger.info(f"Checking Update: Local={local_ver} vs Remote={remote_ver}")
 
-            # Buffer: Remote must be at least 60 seconds newer than local build to avoid race conditions
-            if remote_time > (local_time + 60):
+            # 3. Compare: Only update if remote is STRICTLY greater
+            if remote_ver > local_ver:
                 return True, latest_tag, asset_url, body
                     
             return False, None, None, None
