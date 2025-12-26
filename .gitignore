@@ -8,6 +8,8 @@
 !.gitignore
 !pyproject.toml
 !README.md
+!.agent/
+!.agent/**
 !src/**
 !assets/**
 !demo_build_v2.py
