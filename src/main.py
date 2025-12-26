@@ -8,16 +8,22 @@ import sys
 import os
 import traceback
 
-# --- DEBUG ALL THE THINGS ---
-print("--- PYTHON STARTUP DEBUG ---")
-print(f"CWD: {os.getcwd()}")
-try:
-    print(f"__file__: {__file__}")
-    print(f"Dirname: {os.path.dirname(os.path.abspath(__file__))}")
-except NameError:
-    print("__file__ not defined")
+# --- INITIALIZE DEBUG LOGGING FIRST ---
+from services.debug_logger import init_logging, get_logger
 
-print(f"sys.path before: {sys.path}")
+# Initialize logging before anything else
+init_logging()
+logger = get_logger("main")
+
+logger.info("Application starting...")
+logger.debug(f"CWD: {os.getcwd()}")
+try:
+    logger.debug(f"__file__: {__file__}")
+    logger.debug(f"Dirname: {os.path.dirname(os.path.abspath(__file__))}")
+except NameError:
+    logger.debug("__file__ not defined")
+
+logger.debug(f"sys.path before: {sys.path}")
 
 # Ensure we are in the right place
 if getattr(sys, 'frozen', False):
@@ -26,31 +32,23 @@ else:
     app_dir = os.path.dirname(os.path.abspath(__file__))
 
 if app_dir not in sys.path:
-    print(f"Adding {app_dir} to sys.path")
+    logger.debug(f"Adding {app_dir} to sys.path")
     sys.path.insert(0, app_dir)
 
-print(f"sys.path after: {sys.path}")
+logger.debug(f"sys.path after: {sys.path}")
 
-print("Directory listing of app_dir:")
-try:
-    for item in os.listdir(app_dir):
-        print(f" - {item}")
-        if os.path.isdir(os.path.join(app_dir, item)):
-             print(f"   (DIR) Contents of {item}: {os.listdir(os.path.join(app_dir, item))}")
-except Exception as e:
-    print(f"Error listing dir: {e}")
-
-print("Attempting imports...")
+logger.info("Attempting module imports...")
 try:
     import api
-    print(f"Import api successful: {api}")
+    logger.debug(f"Import api successful: {api}")
     import api.mock_client
-    print(f"Import api.mock_client successful")
+    logger.debug(f"Import api.mock_client successful")
 except Exception as e:
-    print(f"IMPORT DEBUG FAILED: {e}")
+    logger.error(f"IMPORT FAILED: {e}")
+    import traceback
     traceback.print_exc()
-print("--- END DEBUG ---")
-# ----------------------------
+logger.info("Core imports complete")
+# --- END LOGGING INIT ---
 
 # Standard imports
 import json
@@ -77,7 +75,6 @@ from ui.views.settings import SettingsView
 from ui.views.live_instance import LiveInstanceView
 from ui.views.history import HistoryView
 from services.log_watcher import get_log_watcher
-from services.config import ConfigService
 from services.updater import UpdateService
 
 

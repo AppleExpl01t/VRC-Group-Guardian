@@ -10,7 +10,9 @@ import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from loguru import logger
+from services.debug_logger import get_logger, log_request
+
+logger = get_logger("api.client")
 
 
 class VRChatAPI:
