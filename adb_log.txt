@@ -1,0 +1,102 @@
+﻿
+12-25 19:26:25.088 32499 
+32632 D FreecessController: 
+FZ : com.flet.group_guardian
+(10495) [29963] reason: LEV 
+[cached:O
+12-25 19:27:04.851  2342  
+2401 I SurfaceFlinger: 
+id=121267 Removed 
+Surface(name=cbe3ec7 com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x9590651 - animation-leash 
+of starting_reveal#121267 
+(181)
+12-25 19:27:04.852  2342  
+2401 I SurfaceFlinger: 
+id=121314 Removed 
+Surface(name=b550f0d com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x1f85127 - animation-leash 
+of starting_reveal#121314 
+(181)
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+destroyed 
+Surface(name=b550f0d com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x1f85127 - animation-leash 
+of starting_reveal#121314 
+form LifecycleManager
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+destroyed 
+Surface(name=cbe3ec7 com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x9590651 - animation-leash 
+of starting_reveal#121267 
+form LifecycleManager
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+id=121314 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{Surface(n
+ame=b550f0d com.flet.group_g
+uardian/com.flet.group_guard
+ian.MainActivity)/@0x1f85127
+ - animation-leash of 
+starting_reveal#121314 
+!handle})
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+id=121267 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{Surface(n
+ame=cbe3ec7 com.flet.group_g
+uardian/com.flet.group_guard
+ian.MainActivity)/@0x9590651
+ - animation-leash of 
+starting_reveal#121267 
+!handle})
+12-25 19:27:04.880  2342  
+2342 I Layer   : id=121314 
+Destroyed 
+Surface(name=b550f0d com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x1f85127 - animation-leash 
+of starting_reveal#121314
+12-25 19:27:04.880  2342  
+2342 I Layer   : id=121267 
+Destroyed 
+Surface(name=cbe3ec7 com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x9590651 - animation-leash 
+of starting_reveal#121267
+12-25 19:27:35.296 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:27:40.312 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:28:05.379 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:28:10.390 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+
+

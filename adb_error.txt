@@ -1,0 +1,939 @@
+﻿
+12-25 19:25:21.173  2342  
+2679 I SurfaceFlinger: 
+Capture layer list: 	 
+Background for 9a0662b Surfa
+ceView[com.flet.group_guardi
+an/com.flet.group_guardian.M
+ainActivity]@0#121350(seamle
+ssTransition:0)
+12-25 19:25:21.173  2342  
+2679 I SurfaceFlinger: 
+Capture layer list: 	 
+9a0662b SurfaceView[com.flet
+.group_guardian/com.flet.gro
+up_guardian.MainActivity]@0(
+BLAST)#121349(seamlessTransi
+tion:0)
+12-25 19:25:21.173  2342  
+2679 I SurfaceFlinger: 
+Capture layer list: 	 com.fl
+et.group_guardian/com.flet.g
+roup_guardian.MainActivity$_
+29963#121346(seamlessTransit
+ion:0)
+12-25 19:25:21.241  2342  
+4865 I SurfaceFlinger: 
+Capture layer list: 	 
+Background for 9a0662b Surfa
+ceView[com.flet.group_guardi
+an/com.flet.group_guardian.M
+ainActivity]@0#121350(seamle
+ssTransition:0)
+12-25 19:25:21.241  2342  
+4865 I SurfaceFlinger: 
+Capture layer list: 	 
+9a0662b SurfaceView[com.flet
+.group_guardian/com.flet.gro
+up_guardian.MainActivity]@0(
+BLAST)#121349(seamlessTransi
+tion:0)
+12-25 19:25:21.241  2342  
+4865 I SurfaceFlinger: 
+Capture layer list: 	 com.fl
+et.group_guardian/com.flet.g
+roup_guardian.MainActivity$_
+29963#121346(seamlessTransit
+ion:0)
+12-25 19:25:21.241  2342  
+2413 D RenderEngine: 
+[SEC_SF_EFFECTS] 
+drawLayersInternal,1483, 
+Rendering layer 9a0662b Surf
+aceView[com.flet.group_guard
+ian/com.flet.group_guardian.
+MainActivity]@0(BLAST)#12134
+9 at index 1
+12-25 19:25:21.241  2342  
+2413 D RenderEngine: 
+[SEC_SF_EFFECTS] 
+drawLayersInternal,1483, 
+Rendering layer com.flet.gro
+up_guardian/com.flet.group_g
+uardian.MainActivity$_29963#
+121346 at index 2
+12-25 19:25:21.245 32499 
+32644 D 
+ActivityTaskManager: schedul
+eTopResumedActivityChanged, 
+onTop=false, 
+r=ActivityRecord{258532624 
+u0 com.flet.group_guardian/.
+MainActivity t2997}, caller=
+com.android.server.wm.Activi
+tyTaskSupervisor.scheduleTop
+ResumedActivityStateLossIfNe
+eded:19 com.android.server.w
+m.ActivityTaskSupervisor.upd
+ateTopResumedActivityIfNeede
+d:18 com.android.server.wm.T
+askFragment.setResumedActivi
+ty:75 com.android.server.wm.
+ActivityRecord.setState:91 c
+om.android.server.wm.TaskFra
+gment.startPausing:242 com.a
+ndroid.server.wm.Task$$Exter
+nalSyntheticLambda36.accept:
+152 
+12-25 19:25:21.248 32499  
+3277 D WindowManager: 
+Changing focus from 
+Window{b550f0d u0 com.flet.g
+roup_guardian/com.flet.group
+_guardian.MainActivity} to 
+null displayId=0 Callers=com
+.android.server.wm.ActivityR
+ecord.commitVisibility:161 c
+om.android.server.wm.Activit
+yRecord.setVisibility:623 co
+m.android.server.wm.Activity
+Record.makeInvisible:33 com.
+android.server.wm.EnsureActi
+vitiesVisibleHelper.setActiv
+ityVisibilityState:302 
+12-25 19:25:21.248 32499  
+3277 V WindowManager: 
+Setting visibility of 
+Window{b550f0d u0 com.flet.g
+roup_guardian/com.flet.group
+_guardian.MainActivity}: 
+false, caller=com.android.se
+rver.wm.WindowContainer.send
+AppVisibilityToClients:19 co
+m.android.server.wm.WindowTo
+ken.setClientVisible:48 com.
+android.server.wm.ActivityRe
+cord.commitVisibility:186 co
+m.android.server.wm.Activity
+Record.setVisibility:623 com
+.android.server.wm.ActivityR
+ecord.makeInvisible:33 
+12-25 19:25:21.251 32499 
+32593 D SGM:FgCheckThread: 
+notePauseComponent(), 
+received pkgName: 
+com.flet.group_guardian, 
+userId: 0
+12-25 19:25:21.251 32499 
+32593 D SGM:FgCheckThread: 
+notePauseComponent(), 
+received pkgName: 
+com.flet.group_guardian, 
+userId: 0
+12-25 19:25:21.251 32499 
+32593 D SGM:FgCheckThread: 
+notifyFocusInOut(). of pkg: 
+com.flet.group_guardian, 
+type: 20, isSecGameFamily: 
+false, userId: 0
+12-25 19:25:21.251 32499 
+32593 D SGM:GameManager: 
+identifyGamePackage. 
+com.flet.group_guardian, 
+mCurrentUserId: 0, 
+callingMethodInfo: com.samsu
+ng.android.game.SemGameManag
+er.isGamePackage(SemGameMana
+ger.java:105)
+12-25 19:25:21.251 32499 
+32593 D SGM:SemGameManager: 
+isGamePackage(), pkgName=com
+.flet.group_guardian, 
+ret=false
+12-25 19:25:21.251  5372  
+5393 I 
+Routine@Core[4.9.06.0]: Acti
+vityWatcherListenerImpl: 
+onPauseComponent: 
+componentName - 
+com.flet.group_guardian, 
+userId: 0
+12-25 19:25:21.255 29963 
+29963 D 
+SurfaceComposerClient: 
+setCornerRadius ## 9a0662b S
+urfaceView[com.flet.group_gu
+ardian/com.flet.group_guardi
+an.MainActivity]@0#121348 
+cornerRadius=0.000000
+12-25 19:25:21.274  2342  
+2679 I SurfaceFlinger: 
+Capture layer list: 	 
+Background for 9a0662b Surfa
+ceView[com.flet.group_guardi
+an/com.flet.group_guardian.M
+ainActivity]@0#121350(seamle
+ssTransition:0)
+12-25 19:25:21.274  2342  
+2679 I SurfaceFlinger: 
+Capture layer list: 	 
+9a0662b SurfaceView[com.flet
+.group_guardian/com.flet.gro
+up_guardian.MainActivity]@0(
+BLAST)#121349(seamlessTransi
+tion:0)
+12-25 19:25:21.274  2342  
+2679 I SurfaceFlinger: 
+Capture layer list: 	 com.fl
+et.group_guardian/com.flet.g
+roup_guardian.MainActivity$_
+29963#121346(seamlessTransit
+ion:0)
+12-25 19:25:21.281  2342  
+2342 I SurfaceFlinger: 
+RequestedLayer [com.flet.gro
+up_guardian/com.flet.group_g
+uardian.MainActivity$_29963#
+121346] hidden!! flag  
+from(0) --> to(1)
+12-25 19:25:21.281  2342  
+2342 I SurfaceFlinger: 
+RequestedLayer 
+[ActivityRecord{258532624 
+u0 com.flet[...]guardian/.Ma
+inActivity t2997}#121298] 
+hidden!! flag  from(0) --> 
+to(1)
+12-25 19:25:21.282 32499  
+4411 D InputDispatcher: 
+Focus left window (0): 
+b550f0d com.flet.group_guard
+ian/com.flet.group_guardian.
+MainActivity
+12-25 19:25:21.284 32499  
+4411 I WindowManager: 
+Relayout Window{b550f0d u0 c
+om.flet.group_guardian/com.f
+let.group_guardian.MainActiv
+ity}: viewVisibility=8 
+req=1080x2520 ty=1 d0
+12-25 19:25:21.287 29963 
+29963 D 
+VRI[MainActivity]@7bbb3d0: 
+WindowStopped on com.flet.gr
+oup_guardian/com.flet.group_
+guardian.MainActivity set 
+to true
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{9a0662b SurfaceView[com.f
+let.group_guardian/com.flet.
+group_guardian.MainActivity]
+@0#121348 z=-2} 2 
+children}] reparent to 
+OffscreenRoot
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{9a0662b SurfaceView[com.f
+let.group_guardian/com.flet.
+group_guardian.MainActivity]
+@0#121348 z=-2} 2 
+children}] RelativeParent 
+to null
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{Bounds for - com.flet.gro
+up_guardian/com.flet.group_g
+uardian.MainActivity@1#12134
+7} no children}] reparent 
+to OffscreenRoot
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{Bounds for - com.flet.gro
+up_guardian/com.flet.group_g
+uardian.MainActivity@1#12134
+7} no children}] 
+RelativeParent to null
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{Background for 9a0662b Su
+rfaceView[com.flet.group_gua
+rdian/com.flet.group_guardia
+n.MainActivity]@0#121350 
+z=-2147483648} no 
+children}] reparent to 
+OffscreenRoot
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{Background for 9a0662b Su
+rfaceView[com.flet.group_gua
+rdian/com.flet.group_guardia
+n.MainActivity]@0#121350 
+z=-2147483648} no 
+children}] RelativeParent 
+to null
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{9a0662b SurfaceView[com.f
+let.group_guardian/com.flet.
+group_guardian.MainActivity]
+@0(BLAST)#121349} no 
+children}] reparent to 
+OffscreenRoot
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{9a0662b SurfaceView[com.f
+let.group_guardian/com.flet.
+group_guardian.MainActivity]
+@0(BLAST)#121349} no 
+children}] RelativeParent 
+to null
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: 
+id=121349 Removed 9a0662b Su
+rfaceView[com.flet.group_gua
+rdian/com.flet.group_guardia
+n.MainActivity]@0(BLAST)#121
+349 (189)
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: 
+id=121348 Removed 9a0662b Su
+rfaceView[com.flet.group_gua
+rdian/com.flet.group_guardia
+n.MainActivity]@0#121348 
+(189)
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: 
+id=121350 Removed 
+Background for 9a0662b Surfa
+ceView[com.flet.group_guardi
+an/com.flet.group_guardian.M
+ainActivity]@0#121350 (189)
+12-25 19:25:21.297  2342  
+2342 I SurfaceFlinger: 
+id=121347 Removed Bounds 
+for - com.flet.group_guardia
+n/com.flet.group_guardian.Ma
+inActivity@1#121347 (189)
+12-25 19:25:21.305 32499 
+32593 D SGM:FgCheckThread: 
+getForegroundApp(), foregrou
+ndPkgName=com.flet.group_gua
+rdian
+12-25 19:25:21.305 32499  
+4416 E WindowManager: 
+win=Window{b550f0d u0 com.fl
+et.group_guardian/com.flet.g
+roup_guardian.MainActivity} 
+destroySurfaces: 
+appStopped=true 
+cleanupOnResume=false win.mW
+indowRemovalAllowed=false 
+win.mRemoveOnExit=false 
+win.mViewVisibility=8 caller
+=com.android.server.wm.Activ
+ityRecord.destroySurfaces:25
+ com.android.server.wm.Activ
+ityRecord.activityStopped:19
+2 com.android.server.wm.Acti
+vityClientController.activit
+yStopped:97 android.app.IAct
+ivityClientController$Stub.o
+nTransact:726 com.android.se
+rver.wm.ActivityClientContro
+ller.onTransact:1 android.os
+.Binder.execTransactInternal
+:1462 android.os.Binder.exec
+Transact:1401 
+12-25 19:25:21.305 32499 
+32593 D SGM:FgCheckThread: 
+pkgName: 
+com.flet.group_guardian is 
+not in foreground
+12-25 19:25:21.305  5372 
+29521 I 
+Routine@Core[4.9.06.0]: Acti
+vityWatcherListenerImpl: 
+onStopComponent: 
+componentName - 
+com.flet.group_guardian, 
+userId: 0
+12-25 19:25:21.421  2342  
+2342 I SurfaceFlinger: 
+destroyed 9a0662b SurfaceVie
+w[com.flet.group_guardian/co
+m.flet.group_guardian.MainAc
+tivity]@0#121348 form 
+LifecycleManager
+12-25 19:25:21.421  2342  
+2342 I SurfaceFlinger: 
+destroyed Bounds for - com.f
+let.group_guardian/com.flet.
+group_guardian.MainActivity@
+1#121347 form 
+LifecycleManager
+12-25 19:25:21.421  2342  
+2342 I SurfaceFlinger: 
+destroyed Background for 
+9a0662b SurfaceView[com.flet
+.group_guardian/com.flet.gro
+up_guardian.MainActivity]@0#
+121350 form LifecycleManager
+12-25 19:25:21.421  2342  
+2342 I SurfaceFlinger: 
+destroyed 9a0662b SurfaceVie
+w[com.flet.group_guardian/co
+m.flet.group_guardian.MainAc
+tivity]@0(BLAST)#121349 
+form LifecycleManager
+12-25 19:25:21.421  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{com.flet.group_guardian/c
+om.flet.group_guardian.MainA
+ctivity$_29963#121346} no 
+children}] reparent to 
+OffscreenRoot
+12-25 19:25:21.421  2342  
+2342 I SurfaceFlinger: [Laye
+rHierarchy{RequestedLayerSta
+te{com.flet.group_guardian/c
+om.flet.group_guardian.MainA
+ctivity$_29963#121346} no 
+children}] RelativeParent 
+to null
+12-25 19:25:21.422  2342  
+2342 I SurfaceFlinger: 
+id=121348 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{9a0662b S
+urfaceView[com.flet.group_gu
+ardian/com.flet.group_guardi
+an.MainActivity]@0#121348 
+!handle z=-2})
+12-25 19:25:21.422  2342  
+2342 I SurfaceFlinger: 
+id=121347 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{Bounds 
+for - com.flet.group_guardia
+n/com.flet.group_guardian.Ma
+inActivity@1#121347 
+!handle})
+12-25 19:25:21.422  2342  
+2342 I SurfaceFlinger: 
+id=121350 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{Backgroun
+d for 9a0662b SurfaceView[co
+m.flet.group_guardian/com.fl
+et.group_guardian.MainActivi
+ty]@0#121350 !handle 
+z=-2147483648})
+12-25 19:25:21.422  2342  
+2342 I SurfaceFlinger: 
+id=121349 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{9a0662b S
+urfaceView[com.flet.group_gu
+ardian/com.flet.group_guardi
+an.MainActivity]@0(BLAST)#12
+1349 !handle})
+12-25 19:25:21.422  2342  
+2342 I Layer   : id=121348 
+Destroyed 9a0662b SurfaceVie
+w[com.flet.group_guardian/co
+m.flet.group_guardian.MainAc
+tivity]@0#121348
+12-25 19:25:21.422  2342  
+2342 I Layer   : id=121347 
+Destroyed Bounds for - com.f
+let.group_guardian/com.flet.
+group_guardian.MainActivity@
+1#121347
+12-25 19:25:21.422  2342  
+2342 I Layer   : id=121350 
+Destroyed Background for 
+9a0662b SurfaceView[com.flet
+.group_guardian/com.flet.gro
+up_guardian.MainActivity]@0#
+121350
+12-25 19:25:21.422  2342  
+2342 I Layer   : id=121349 
+Destroyed 9a0662b SurfaceVie
+w[com.flet.group_guardian/co
+m.flet.group_guardian.MainAc
+tivity]@0(BLAST)#121349
+12-25 19:25:21.422  2342  
+2342 I SurfaceFlinger: 
+id=121346 Removed com.flet.g
+roup_guardian/com.flet.group
+_guardian.MainActivity$_2996
+3#121346 (185)
+12-25 19:25:21.430  2342  
+2342 I SurfaceFlinger: 
+destroyed com.flet.group_gua
+rdian/com.flet.group_guardia
+n.MainActivity$_29963#121346
+ form LifecycleManager
+12-25 19:25:21.430  2342  
+2342 I SurfaceFlinger: 
+id=121346 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{com.flet.
+group_guardian/com.flet.grou
+p_guardian.MainActivity$_299
+63#121346 !handle})
+12-25 19:25:21.431  2342  
+2342 I Layer   : id=121346 
+Destroyed com.flet.group_gua
+rdian/com.flet.group_guardia
+n.MainActivity$_29963#121346
+12-25 19:25:21.447   639   
+639 E 
+ClockPackSettingsUtils: 
+isRoamingState: android.prov
+ider.Settings$SettingNotFoun
+dException: easy_mode_switch
+12-25 19:25:21.450   639   
+639 E 
+ClockPackSettingsUtils: 
+isRoamingState: android.prov
+ider.Settings$SettingNotFoun
+dException: easy_mode_switch
+12-25 19:25:21.474  2119 
+27539 E LoadedApk: 
+Exception : java.lang.NullPo
+interException: Attempt to 
+invoke virtual method 
+'boolean android.os.Looper.i
+sPerfLogEnable()' on a null 
+object reference
+12-25 19:25:21.474 22140 
+25394 E fb4a.msys: E[N mccw.
+liger]onReadError(732)=>read
+/error - ex: 
+AsyncSocketException: 
+recv() failed 
+(peer=57.144.204.8:5222), 
+type = Internal error, 
+errno = 103 (Software 
+caused connection abort), 
+errno: 103
+12-25 19:25:21.475 22140 
+23581 E fb4a.msys: E[N WA]_W
+CCXMPPStreamDisconnectHandle
+r(334)=>xmpp/disconnect - 
+WCIStreamStateErrorCode: 2, 
+domain: WCIStreamState, 
+subdomain: MCCWLigerStream: 
+Error Domain=WCIStreamState 
+Code=2 UserInfo=0x72f76b380 
+{MCFErrorDirectUnderlyingErr
+orKey=0xb400006e6ec1da50 
+"Error 
+Domain=MCCWLigerStream 
+Code=2 UserInfo=0x72f76b340 
+{MCFErrorDirectLocalizedFail
+ureReasonKey=AsyncSocketExce
+ption: recv() failed 
+(peer=57.144.204.8:5222), 
+type = Internal error, 
+errno = 103 (Software 
+caused connection abort)}"}
+12-25 19:25:21.478 22140 
+23582 E fb4a.msys: E[N 
+MQTT]onReadError(657)=>Read 
+Error: 
+AsyncSocketException: 
+recv() failed 
+(peer=57.144.204.144:443), 
+type = Internal error, 
+errno = 103 (Software 
+caused connection abort)
+12-25 19:25:21.480  2119 
+29631 E LoadedApk: 
+Exception : java.lang.NullPo
+interException: Attempt to 
+invoke virtual method 
+'boolean android.os.Looper.i
+sPerfLogEnable()' on a null 
+object reference
+12-25 19:25:21.481  2119 
+27425 E LoadedApk: 
+Exception : java.lang.NullPo
+interException: Attempt to 
+invoke virtual method 
+'boolean android.os.Looper.i
+sPerfLogEnable()' on a null 
+object reference
+12-25 19:25:21.491   639   
+639 W Bundle  : Attempt to 
+cast generated internal 
+exception:
+12-25 19:25:21.491   639   
+639 W Bundle  : java.lang.Cl
+assCastException: 
+java.lang.Integer cannot be 
+cast to java.lang.String
+12-25 19:25:21.491   639   
+639 W Bundle  : Attempt to 
+cast generated internal 
+exception:
+12-25 19:25:21.491   639   
+639 W Bundle  : java.lang.Cl
+assCastException: 
+java.lang.Integer cannot be 
+cast to java.lang.String
+12-25 19:25:21.492 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:25:21.506 32499   
+889 D SGM:GameManager: 
+identifyForegroundApp. 
+com.flet.group_guardian, 
+mCurrentUserId: 0, 
+callerUserId: 0
+12-25 19:25:26.082   639   
+639 E 
+ClockPackSettingsUtils: 
+isRoamingState: android.prov
+ider.Settings$SettingNotFoun
+dException: easy_mode_switch
+12-25 19:25:26.083   639   
+639 E 
+ClockPackSettingsUtils: 
+isRoamingState: android.prov
+ider.Settings$SettingNotFoun
+dException: easy_mode_switch
+12-25 19:25:26.483 22140 
+25394 E fb4a.msys: E[N mccw.
+liger]onReadError(732)=>read
+/error - ex: 
+AsyncSocketException: 
+recv() failed 
+(peer=57.144.204.8:5222), 
+type = Internal error, 
+errno = 103 (Software 
+caused connection abort), 
+errno: 103
+12-25 19:25:26.483 22140 
+23582 E fb4a.msys: E[N 
+MQTT]onReadError(657)=>Read 
+Error: 
+AsyncSocketException: 
+recv() failed 
+(peer=57.144.204.144:443), 
+type = Internal error, 
+errno = 103 (Software 
+caused connection abort)
+12-25 19:25:26.489 22140 
+23581 E fb4a.msys: E[N WA]_W
+CCXMPPStreamDisconnectHandle
+r(334)=>xmpp/disconnect - 
+WCIStreamStateErrorCode: 2, 
+domain: WCIStreamState, 
+subdomain: MCCWLigerStream: 
+Error Domain=WCIStreamState 
+Code=2 UserInfo=0x72f76a580 
+{MCFErrorDirectUnderlyingErr
+orKey=0xb400006e6ebdcb50 
+"Error 
+Domain=MCCWLigerStream 
+Code=2 UserInfo=0x72f76a340 
+{MCFErrorDirectLocalizedFail
+ureReasonKey=AsyncSocketExce
+ption: recv() failed 
+(peer=57.144.204.8:5222), 
+type = Internal error, 
+errno = 103 (Software 
+caused connection abort)}"}
+12-25 19:25:27.496 22140 
+27832 W X.7DG   : Exception 
+thrown during refresh
+12-25 19:25:27.496 22140 
+27832 W X.7DG   : java.util.
+concurrent.ExecutionExceptio
+n: java.net.UnknownHostExcep
+tion: Unable to resolve 
+host "chat-e2ee-mini.faceboo
+k.com": No address 
+associated with hostname
+12-25 19:25:27.496 22140 
+27832 W X.7DG   : 	at 
+X.Wr0.setException(Unknown 
+Source:19)
+12-25 19:25:27.496 22140 
+27832 W X.7DG   : 	at java.u
+til.concurrent.FutureTask.se
+tException(FutureTask.java:3
+03)
+12-25 19:25:27.496 22140 
+27832 W X.7DG   : Caused 
+by: java.net.UnknownHostExce
+ption: Unable to resolve 
+host "chat-e2ee-mini.faceboo
+k.com": No address 
+associated with hostname
+12-25 19:25:38.467 18866 
+19064 E newrelic: 
+HarvestConnection: 
+Attempting to convert 
+network exception java.net.U
+nknownHostException to 
+error code.
+12-25 19:25:58.584 18866 
+19080 E newrelic: 
+TransactionStateUtil: 
+Attempting to convert 
+network exception java.net.U
+nknownHostException to 
+error code.
+12-25 19:25:58.585 18866 
+19080 E newrelic: 
+TransactionStateUtil: 
+Attempting to convert 
+network exception java.net.U
+nknownHostException to 
+error code.
+12-25 19:25:58.585 18866 
+19080 E newrelic: 
+TransactionStateUtil: 
+Attempting to convert 
+network exception java.net.U
+nknownHostException to 
+error code.
+12-25 19:25:58.586 18866 
+19080 E newrelic: 
+TransactionStateUtil: 
+Attempting to convert 
+network exception java.net.U
+nknownHostException to 
+error code.
+12-25 19:26:14.546 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:26:14.604  2119  
+2148 I NullBinder: 
+NullBinder for android.net.a
+ction.RECOMMEND_NETWORKS 
+triggering remote Transactio
+nTooLargeException due to 
+Service without Chimera 
+impl, calling uid: 1000, 
+calling pid: 0
+12-25 19:26:14.841 30750 
+30805 I BugleRcs: android.co
+ntent.pm.PackageManager$Name
+NotFoundException: 
+com.google.android.ims
+12-25 19:26:18.149 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:26:21.071 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:26:25.088 32499 
+32632 D FreecessController: 
+FZ : com.flet.group_guardian
+(10495) [29963] reason: LEV 
+[cached:O
+12-25 19:26:29.913 30750 
+30816 I BugleRcsJibe: RcsSer
+viceConnectionException was 
+raised while waiting to 
+connect to 
+RcsEngineLifecycleServiceV2
+12-25 19:26:29.957 30750 
+30820 I BugleRcsJibe: RcsSer
+viceConnectionException was 
+raised while waiting to 
+connect to 
+RcsEngineLifecycleServiceV2
+12-25 19:26:29.959 30750 
+30820 I BugleRcsJibe: RcsSer
+viceConnectionException was 
+raised while waiting to 
+connect to 
+RcsEngineLifecycleServiceV2
+12-25 19:27:04.851  2342  
+2401 I SurfaceFlinger: 
+id=121267 Removed 
+Surface(name=cbe3ec7 com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x9590651 - animation-leash 
+of starting_reveal#121267 
+(181)
+12-25 19:27:04.852  2342  
+2401 I SurfaceFlinger: 
+id=121314 Removed 
+Surface(name=b550f0d com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x1f85127 - animation-leash 
+of starting_reveal#121314 
+(181)
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+destroyed 
+Surface(name=b550f0d com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x1f85127 - animation-leash 
+of starting_reveal#121314 
+form LifecycleManager
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+destroyed 
+Surface(name=cbe3ec7 com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x9590651 - animation-leash 
+of starting_reveal#121267 
+form LifecycleManager
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+id=121314 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{Surface(n
+ame=b550f0d com.flet.group_g
+uardian/com.flet.group_guard
+ian.MainActivity)/@0x1f85127
+ - animation-leash of 
+starting_reveal#121314 
+!handle})
+12-25 19:27:04.879  2342  
+2342 I SurfaceFlinger: 
+id=121267 onLayerDestroyed 
+from LayerHierarchyBuilder(R
+equestedLayerState{Surface(n
+ame=cbe3ec7 com.flet.group_g
+uardian/com.flet.group_guard
+ian.MainActivity)/@0x9590651
+ - animation-leash of 
+starting_reveal#121267 
+!handle})
+12-25 19:27:04.880  2342  
+2342 I Layer   : id=121314 
+Destroyed 
+Surface(name=b550f0d com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x1f85127 - animation-leash 
+of starting_reveal#121314
+12-25 19:27:04.880  2342  
+2342 I Layer   : id=121267 
+Destroyed 
+Surface(name=cbe3ec7 com.fle
+t.group_guardian/com.flet.gr
+oup_guardian.MainActivity)/@
+0x9590651 - animation-leash 
+of starting_reveal#121267
+12-25 19:27:10.616 30937 
+31040 E GoogleApiManager: ja
+va.lang.SecurityException: 
+Unknown calling package 
+name 
+'com.google.android.gms'.
+12-25 19:27:10.616 30937 
+31040 E GoogleApiManager: 	
+at android.os.Parcel.createE
+xceptionOrNull(Parcel.java:3
+354)
+12-25 19:27:10.616 30937 
+31040 E GoogleApiManager: 	
+at android.os.Parcel.createE
+xception(Parcel.java:3338)
+12-25 19:27:10.616 30937 
+31040 E GoogleApiManager: 	
+at android.os.Parcel.readExc
+eption(Parcel.java:3321)
+12-25 19:27:10.616 30937 
+31040 E GoogleApiManager: 	
+at android.os.Parcel.readExc
+eption(Parcel.java:3263)
+12-25 19:27:21.135 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:27:35.296 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:27:40.312 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:27:40.655 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:28:05.379 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:28:10.390 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:29:05.152 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+12-25 19:29:05.544 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:29:10.560 32499 
+32632 D 
+MARs:ActiveTrafficFilter: 
+filter : 
+com.flet.group_guardian(0)
+12-25 19:29:11.073 32499   
+319 E WifiStaIfaceAidlImpl: 
+getCachedScanData failed 
+with service-specific 
+exception: android.os.Servic
+eSpecificException:  (code 
+4)
+
+
