@@ -565,6 +565,29 @@ class VRChatAPI:
             await self._client.aclose()
             self._client = None
     
+    async def get_pipeline_token(self) -> Optional[str]:
+        """
+        Get authentication token for WebSocket pipeline.
+        Used to connect to wss://pipeline.vrchat.cloud
+        
+        Returns:
+            Auth token string, or None if failed
+        """
+        try:
+            response = await self._request("GET", "/auth")
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok"):
+                    return data.get("token")
+                    
+            logger.warning(f"Failed to get pipeline token: {response.status_code}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting pipeline token: {e}")
+            return None
+    
     async def get_my_location(self) -> Optional[Dict[str, str]]:
         """
         Get the current user's location from the VRChat API.

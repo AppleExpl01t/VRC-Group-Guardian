@@ -4,3 +4,4 @@ pydantic>=2.5.0
 loguru>=0.7.0
 keyring>=24.0.0
 appdirs>=1.4.4
+websockets>=12.0

@@ -76,6 +76,7 @@ from ui.views.live_instance import LiveInstanceView
 from ui.views.history import HistoryView
 from services.log_watcher import get_log_watcher
 from services.updater import UpdateService
+from services.websocket_pipeline import get_pipeline, get_event_handler
 
 
 class GroupGuardianApp:
@@ -105,6 +106,10 @@ class GroupGuardianApp:
         
         # VRChat API client
         self._api = VRChatAPI()
+        
+        # WebSocket pipeline for real-time updates (friend status, notifications, etc.)
+        self._pipeline = get_pipeline()
+        self._pipeline_connected = False
         
         # Setup theme
         setup_theme(page)
@@ -372,11 +377,69 @@ class GroupGuardianApp:
     def _handle_login_success(self):
         """Handle successful login - go to welcome screen"""
         self._is_authenticated = True
+        
+        # Start WebSocket pipeline for real-time updates
+        self.page.run_task(self._connect_pipeline)
+        
         if self._current_user:
             self._show_welcome(self._current_user)
         else:
             # Fallback if no user object (shouldn't happen)
             self.page.go("/groups")
+    
+    async def _connect_pipeline(self):
+        """Connect to VRChat's real-time WebSocket pipeline"""
+        try:
+            token = await self._api.get_pipeline_token()
+            if token:
+                # Initialize event handler for default behaviors
+                get_event_handler()
+                
+                # Add custom listeners for our app
+                self._pipeline.add_listener("notification", self._on_pipeline_notification)
+                self._pipeline.add_listener("group-member-updated", self._on_group_member_updated)
+                
+                await self._pipeline.connect(token)
+                self._pipeline_connected = True
+                logger.info("WebSocket pipeline connected - real-time updates enabled")
+            else:
+                logger.warning("Could not get pipeline token - using polling mode")
+        except Exception as e:
+            logger.error(f"Failed to connect pipeline: {e}")
+    
+    def _on_pipeline_notification(self, data: dict):
+        """Handle real-time notifications from pipeline"""
+        noty_type = data.get("type", "")
+        logger.info(f"Real-time notification: {noty_type}")
+        
+        # Refresh pending requests if it's a group invite request
+        if noty_type in ["group.invite", "requestInvite", "groupQueueRequest"]:
+            if self._current_group:
+                self.page.run_task(self._refresh_pending_requests_silently)
+    
+    def _on_group_member_updated(self, data: dict):
+        """Handle real-time group member updates from pipeline"""
+        member = data.get("member", {})
+        group_id = member.get("groupId", "")
+        
+        # If it's for our current group, refresh data
+        if self._current_group and group_id == self._current_group.get("id"):
+            logger.info(f"Group member updated in current group")
+            # Could trigger specific view refreshes here
+    
+    async def _refresh_pending_requests_silently(self):
+        """Silently refresh pending request count without UI disruption"""
+        if self._current_group:
+            try:
+                requests = await self._api.get_group_join_requests(
+                    self._current_group["id"],
+                    n=1  # Just need count
+                )
+                # Update sidebar badge if needed
+                if self._sidebar:
+                    self._sidebar.update_pending_count(len(requests))
+            except:
+                pass  # Silent fail
     
     def _show_welcome(self, user: dict):
         """Show cinematic welcome screen"""
