@@ -138,7 +138,7 @@ class UpdateService:
     @staticmethod
     def apply_update(new_exe_path: str):
         """
-        Create a batch script to swap the executable and restart.
+        Launch the new executable with instructions to replace the old one.
         """
         import os
         import sys
@@ -147,30 +147,69 @@ class UpdateService:
         if getattr(sys, 'frozen', False):
             current_exe = sys.executable
         else:
-            # In dev mode, we can't really "restart" the exe, so just mock it
-            logger.warning("Auto-update not supported in dev mode. Just pretending.")
+            logger.warning("Auto-update not supported in dev mode.")
             return
 
-        base_dir = os.path.dirname(current_exe)
-        exe_name = os.path.basename(current_exe)
-        bat_path = os.path.join(base_dir, "update.bat")
-        
-        # Script content: Wait, Delete Old, Rename New, Start New, Delete Self
-        script = f"""
-@echo off
-timeout /t 2 /nobreak > NUL
-del "{exe_name}"
-move "{os.path.basename(new_exe_path)}" "{exe_name}"
-start "" "{exe_name}"
-del "%~f0"
-"""
-        with open(bat_path, "w") as f:
-            f.write(script)
-            
-        # Launch the script and exit
-        logger.info(f"Launching update script: {bat_path}")
-        subprocess.Popen([bat_path], shell=True)
+        # Launch the NEW exe, telling it to delete THIS exe
+        # Argument: --perform-update "Path\To\Old.exe"
+        logger.info(f"Launching new version for swap: {new_exe_path}")
+        subprocess.Popen([new_exe_path, "--perform-update", current_exe])
         sys.exit(0)
+
+    @staticmethod
+    def handle_update_process():
+        """
+        Called at startup to check if we are the 'updater' process.
+        Returns TRUE if we handled an update and should exit.
+        """
+        import sys
+        import os
+        import time
+        import shutil
+        import subprocess
+
+        if "--perform-update" in sys.argv:
+            try:
+                # We are the NEW process (running as .new usually)
+                old_exe_path = sys.argv[sys.argv.index("--perform-update") + 1]
+                
+                # 1. Wait for old process to exit
+                time.sleep(2) 
+                
+                # 2. Delete the old executable
+                if os.path.exists(old_exe_path):
+                    try:
+                        os.remove(old_exe_path)
+                    except Exception as e:
+                        # If deletion fails, we can't really proceed with a clean swap
+                        # But we are already running the new version...
+                        print(f"Failed to delete old exe: {e}")
+                
+                # 3. Copy OURSELVES to the original name (GroupGuardian.exe)
+                # We are currently running as GroupGuardian_new.exe
+                current_running_path = sys.executable
+                
+                # Check if we are already named correctly (unlikely in this flow)
+                if os.path.abspath(current_running_path) == os.path.abspath(old_exe_path):
+                    return False # Nothing to do?
+                
+                shutil.copy2(current_running_path, old_exe_path)
+                
+                # 4. Launch the restored 'GroupGuardian.exe'
+                subprocess.Popen([old_exe_path])
+                
+                # 5. Exit this temporary process containing the update logic
+                # The OS will clean up this temp file eventually or we leave it 
+                # (Optional: launch a cleanup script for the .new file? Hard to self-delete.)
+                sys.exit(0)
+                
+            except Exception as e:
+                print(f"Update error: {e}")
+                # If update failed, maybe just continue running as the new version?
+                # or exiting? Let's continue running so the user at least has the app.
+                return False
+        
+        return False
 
     @staticmethod
     async def get_latest_asset_url(tag):

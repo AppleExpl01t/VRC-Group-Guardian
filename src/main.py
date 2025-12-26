@@ -77,6 +77,8 @@ from ui.views.settings import SettingsView
 from ui.views.live_instance import LiveInstanceView
 from ui.views.history import HistoryView
 from services.log_watcher import get_log_watcher
+from services.config import ConfigService
+from services.updater import UpdateService
 
 
 class GroupGuardianApp:
@@ -898,6 +900,9 @@ from ui.theme import radius, typography
 
 def main(page: ft.Page):
     """Application entry point"""
+    # Handle auto-update process if flags are present
+    UpdateService.handle_update_process()
+    
     try:
         GroupGuardianApp(page)
     except Exception as e:
