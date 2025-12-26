@@ -77,6 +77,8 @@ from ui.views.history import HistoryView
 from services.log_watcher import get_log_watcher
 from services.updater import UpdateService
 from services.websocket_pipeline import get_pipeline, get_event_handler
+from ui.dialogs.data_folder_setup import show_data_folder_setup
+from utils.paths import is_data_folder_configured
 
 
 class GroupGuardianApp:
@@ -149,7 +151,18 @@ class GroupGuardianApp:
                 print(f"Failed to start LogWatcher: {e}")
                 self._supports_live = False # Fallback if start fails
         
-        # Check for existing session in background
+        # Check if data folder needs to be configured (first launch)
+        if not is_data_folder_configured():
+            # Show setup dialog - will call _on_data_folder_configured when done
+            show_data_folder_setup(page, on_complete=self._on_data_folder_configured)
+        else:
+            # Already configured, proceed with session check
+            self.page.run_task(self._check_existing_session)
+    
+    def _on_data_folder_configured(self, path: str):
+        """Called when user completes data folder setup."""
+        logger.info(f"Data folder configured: {path}")
+        # Now proceed with session check
         self.page.run_task(self._check_existing_session)
     
     async def _check_existing_session(self):
