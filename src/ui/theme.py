@@ -232,3 +232,19 @@ def create_text(
         weight=weight,
         font_family=font_family or typography.font_family,
     )
+
+# Legacy / Dict-style access for new components
+COLORS = {
+    "background": colors.bg_deepest,
+    "surface": colors.bg_elevated,
+    "surface_bright": colors.bg_glass,
+    "border": colors.glass_border,
+    "accent_primary": colors.accent_primary,
+    "text_primary": colors.text_primary,
+    "text_secondary": colors.text_secondary,
+    "text_muted": colors.text_tertiary,
+    "success": colors.success,
+    "danger": colors.danger,
+    "warning": colors.warning,
+    "info": colors.info,
+}
