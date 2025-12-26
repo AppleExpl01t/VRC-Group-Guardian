@@ -5,15 +5,17 @@ from packaging import version
 
 logger = logging.getLogger(__name__)
 
+from datetime import datetime
+
 class UpdateService:
     GITHUB_REPO = "AppleExpl01t/VRC-Group-Guardian"
     CURRENT_VERSION = "1.0.0" 
-    CURRENT_COMMIT_SHA = "9d583336de02cf799fef25809dd966899816cffa7" # Updated automatically during build
+    CURRENT_BUILD_TIMESTAMP = 0 # Injected during build (Unix Config)
     
     @staticmethod
     async def check_for_updates():
         """
-        Check GitHub releases for a new version using COMMIT SHA.
+        Check GitHub releases for a new version using TIMESTAMP.
         Returns (is_available, version_tag, asset_url, release_notes)
         """
         try:
@@ -23,12 +25,12 @@ class UpdateService:
                 response = await client.get(url, timeout=5.0)
                 
             if response.status_code != 200:
-                logger.error(f"Failed to fetch release: {response.status_code}")
                 return False, None, None, None
                 
             data = response.json()
             latest_tag = data.get("tag_name", "")
             body = data.get("body")
+            published_at_str = data.get("published_at") # ISO 8601
             
             # Find .exe asset
             assets = data.get("assets", [])
@@ -38,27 +40,29 @@ class UpdateService:
                     asset_url = asset["browser_download_url"]
                     break
             
-            if not asset_url:
+            if not asset_url or not published_at_str:
                 return False, None, None, None
 
-            # 2. Get Commit SHA for this Tag
-            remote_sha = await UpdateService._get_commit_sha_from_tag(latest_tag)
-            
-            if not remote_sha:
-                logger.warning(f"Could not resolve SHA for tag {latest_tag}")
+            # 2. Compare Timestamps
+            # Parse GitHub time (e.g. 2025-12-25T20:00:00Z)
+            # Simple manual parsing or use dateutil if available. 
+            # Trying standard concise parsing:
+            try:
+                # Handle 'Z' manually if python < 3.11 for fromisoformat
+                if published_at_str.endswith('Z'):
+                    published_at_str = published_at_str[:-1] + '+00:00'
+                remote_time = datetime.fromisoformat(published_at_str).timestamp()
+            except Exception as e:
+                logger.error(f"Time parsing failed: {e}")
                 return False, None, None, None
 
-            # 3. Compare SHAs
-            local_sha = UpdateService.CURRENT_COMMIT_SHA.strip()
-            remote_sha = remote_sha.strip()
+            local_time = float(UpdateService.CURRENT_BUILD_TIMESTAMP)
             
-            logger.info(f"Checking Update: Local SHA={local_sha[:7]} vs Remote SHA={remote_sha[:7]}")
+            logger.info(f"Checking Update: Local Time={local_time} vs Remote Time={remote_time}")
 
-            if remote_sha != local_sha:
-                # Return debug info in body or separate field? 
-                # For now, let's append to body if it exists, or just print it.
-                debug_info = f"\n\n(Debug: Local {local_sha[:7]} != Remote {remote_sha[:7]})"
-                return True, latest_tag, asset_url, (body or "") + debug_info
+            # Buffer: Remote must be at least 60 seconds newer than local build to avoid race conditions
+            if remote_time > (local_time + 60):
+                return True, latest_tag, asset_url, body
                     
             return False, None, None, None
             
