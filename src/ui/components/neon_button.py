@@ -162,7 +162,16 @@ class NeonButton(ft.Container):
     def _handle_click(self, e):
         """Handle click with ripple-like feedback"""
         if self._on_click and not self._disabled and not self._loading:
-            self._on_click(e)
+            try:
+                import inspect
+                if inspect.iscoroutinefunction(self._on_click):
+                    # Check if 'page' works via self.page (it should if control is mounted)
+                    if self.page:
+                         self.page.run_task(self._on_click, e)
+                else:
+                    self._on_click(e)
+            except Exception as ex:
+                print(f"Error in NeonButton click: {ex}")
     
     def set_loading(self, loading: bool):
         """Set loading state"""

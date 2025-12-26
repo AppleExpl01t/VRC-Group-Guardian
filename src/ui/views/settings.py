@@ -8,6 +8,7 @@ import flet as ft
 from ..theme import colors, radius, spacing, typography, shadows
 from ..components.glass_card import GlassCard, GlassPanel
 from ..components.neon_button import NeonButton
+from services.updater import UpdateService
 
 class SettingsView(ft.Container):
     """
@@ -100,6 +101,9 @@ class SettingsView(ft.Container):
         
         self._theme_settings_control = self._build_theme_settings()
         
+        # Update Section
+        update_section = self._build_update_section()
+        
         # Credits Section
         credits_section = self._build_credits_section()
         
@@ -108,6 +112,8 @@ class SettingsView(ft.Container):
                 header,
                 ft.Container(height=spacing.lg),
                 self._theme_settings_control,
+                ft.Container(height=spacing.xl),
+                update_section,
                 ft.Container(height=spacing.xl),
                 credits_section,
                 ft.Container(height=spacing.lg),
@@ -174,6 +180,118 @@ class SettingsView(ft.Container):
             ),
         )
 
+    def _build_update_section(self) -> ft.Control:
+        """Build Update Checker Section"""
+        
+        self._update_status_text = ft.Text(f"Current Version: v{UpdateService.CURRENT_VERSION}", color=colors.text_secondary, size=typography.size_sm)
+        self._update_button = NeonButton(
+            text="Check for Updates", 
+            icon=ft.Icons.UPDATE, 
+            on_click=self._handle_check_update,
+            variant="secondary",
+            height=40
+        )
+        
+        self._update_progress = ft.ProgressBar(width=None, value=0, color=colors.accent_primary, bgcolor=colors.bg_deep, visible=False)
+        
+        return GlassPanel(
+            content=ft.Column(
+                controls=[
+                    ft.Row(controls=[ft.Icon(ft.Icons.SYSTEM_UPDATE_ALT, color=colors.accent_secondary), ft.Text("Application Updates", size=typography.size_lg, weight=ft.FontWeight.W_600, color=colors.text_primary)], spacing=spacing.sm),
+                    ft.Divider(color=colors.glass_border, height=spacing.md),
+                    ft.Row(
+                        controls=[
+                            ft.Column(
+                                controls=[
+                                    self._update_status_text,
+                                    ft.Text("Auto-updates for portable exe", size=typography.size_xs, color=colors.text_tertiary)
+                                ],
+                                spacing=2
+                            ),
+                            ft.Container(expand=True),
+                            self._update_button
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN
+                    ),
+                    ft.Container(height=5),
+                    self._update_progress
+                ]
+            )
+        )
+
+    async def _handle_check_update(self, e):
+        """Handle update check"""
+        self._update_button.set_loading(True)
+        self._update_button.update()
+        
+        try:
+             # Now returns asset_url instead of html_url
+             is_new, tag, asset_url, body = await UpdateService.check_for_updates()
+             
+             if is_new:
+                 self._update_status_text.value = f"New Version Available: {tag}"
+                 self._update_status_text.color = colors.success
+                 
+                 # Prepare for download
+                 self._update_button.text = "Install Now"
+                 self._update_button.icon = ft.Icons.DOWNLOAD_ROUNDED
+                 self._update_button.set_loading(False)
+                 
+                 # Define download callback with the captured asset_url
+                 async def do_update(ev):
+                     await self._handle_download_update(asset_url)
+                     
+                 self._update_button._on_click = do_update 
+                 self._update_button.start_icon_shimmer()
+                 
+             else:
+                 self._update_status_text.value = f"You are up to date (v{UpdateService.CURRENT_VERSION})"
+                 self._update_button.text = "Check for Updates"
+                 self._update_button.set_loading(False)
+                 
+        except Exception as ex:
+             print(f"Update check error: {ex}")
+             self._update_button.set_loading(False)
+             
+        self._update_status_text.update()
+        self._update_button.update()
+        
+    async def _handle_download_update(self, asset_url):
+        """Download and install update"""
+        print(f"Starting update download from {asset_url}")
+        self._update_button.set_loading(True)
+        self._update_progress.visible = True
+        self._update_progress.value = None 
+        self._update_progress.update()
+        
+        try:
+             # Progress callback
+             def on_progress(p):
+                 self._update_progress.value = p
+                 self._update_progress.update()
+
+             # Download directly using the url we found earlier
+             path = await UpdateService.download_update(asset_url, on_progress)
+             
+             # Apply
+             self._update_status_text.value = "Restarting to apply update..."
+             self._update_status_text.update()
+             
+             import asyncio
+             await asyncio.sleep(1)
+             
+             UpdateService.apply_update(path)
+             
+        except Exception as e:
+            print(f"Update failed: {e}")
+            self._update_button.set_loading(False)
+            self._update_progress.visible = False
+            self._update_progress.update()
+            
+            self.page.snack_bar = ft.SnackBar(ft.Text(f"Update failed: {e}"), bgcolor=colors.danger)
+            self.page.snack_bar.open = True
+            self.page.update()
+
     def _build_credits_section(self) -> ft.Control:
         """Build the Developer Credits section"""
         return GlassPanel(
@@ -194,7 +312,7 @@ class SettingsView(ft.Container):
         banner = ft.Container(
             content=ft.Image(src=banner_src, fit=ft.ImageFit.COVER, opacity=0.6) if banner_src else None,
             height=120,
-            bgcolor=colors.primary if not banner_src else None,
+            bgcolor=colors.accent_primary if not banner_src else None,
             border_radius=ft.border_radius.only(top_left=radius.lg, top_right=radius.lg),
             gradient=ft.LinearGradient(colors=[colors.accent_primary, colors.bg_deepest]) if not banner_src else None
         )
@@ -217,45 +335,43 @@ class SettingsView(ft.Container):
             bgcolor=colors.bg_elevated,
             border_radius=radius.md,
             border=ft.border.all(1, colors.accent_secondary),
-            # Position this absolute relative to something? 
-            # Flet Stack positioning:
-            right=-10, top=0
         )
         
         # Use Stack for PFP overlapping Banner
         # Banner is at top. PFP is centered and "low on top", meaning overlapping the bottom edge of banner.
+        
+        # Ensure banner stretches in Stack
+        banner.left = 0
+        banner.right = 0
+        banner.top = 0
         
         profile_stack = ft.Stack(
             controls=[
                 banner,
                 ft.Container(
                     content=pfp,
-                    alignment=ft.alignment.bottom_center,
-                    bottom=-40, # Half height of PFP
+                    alignment=ft.alignment.top_center,
+                    top=80, # Banner (120) - Half PFP (40) = 80
                     left=0, right=0,
                 ),
-                # Status Bubble (Right of PFP)
-                ft.Container(
-                    content=bubble,
-                    bottom=-30,
-                    right=40, # Adjust specific to layout
-                    opacity=0.9
-                ) if status else ft.Container()
             ],
-            height=160, # 120 banner + 40 overlap space
+            height=160,
+            clip_behavior=ft.ClipBehavior.NONE, 
         )
 
         # Info Section
         info_col = ft.Column(
             controls=[
-                ft.Container(height=45), # Spacer for PFP overlap
+                ft.Container(height=10),
+                bubble if status else ft.Container(),
+                ft.Container(height=10),
                 ft.Text(name, size=typography.size_xl, weight=ft.FontWeight.BOLD, color=colors.accent_primary),
                 ft.Text("Lead Developer", size=typography.size_sm, color=colors.text_tertiary),
                 ft.Container(height=spacing.md),
                 
                 # Discord Link
                 NeonButton(
-                    text="Join our Discord Community",
+                    text="Support & Bug Reports",
                     icon=ft.Icons.DISCORD,
                     on_click=lambda e: self.page.launch_url("https://discord.gg/eDKC5yEQJN"),
                     variant="primary",
@@ -267,11 +383,14 @@ class SettingsView(ft.Container):
                 ft.Text("Special Thanks & References", weight=ft.FontWeight.BOLD),
                 ft.Row(
                     controls=[
-                        ft.TextButton("VRCX", on_click=lambda e: self.page.launch_url("https://github.com/vrcx-team/VRCX")),
+                        ft.TextButton("vrcx-team", on_click=lambda e: self.page.launch_url("https://github.com/vrcx-team/VRCX")),
                         ft.Text("|", disabled=True),
-                        ft.TextButton("FCH-Toolkit", on_click=lambda e: self.page.launch_url("https://github.com/FCH-Toolkit/FCH-Toolkit")),
+                        ft.TextButton("Lumi-VRC", on_click=lambda e: self.page.launch_url("https://github.com/Lumi-VRC/FCH-Toolkit-App")),
+                        ft.Text("|", disabled=True),
+                        ft.TextButton("ComfyChloe", on_click=lambda e: self.page.launch_url("https://github.com/ComfyChloe/API-Automation-Tools")),
                     ],
-                    alignment=ft.MainAxisAlignment.CENTER
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    wrap=True,
                 )
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
