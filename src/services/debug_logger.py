@@ -162,6 +162,15 @@ class DebugLogger:
         self.logger.info(f"Python: {sys.version}")
         self.logger.info(f"Frozen: {getattr(sys, 'frozen', False)}")
         self.logger.info("=" * 60)
+        
+        # Reduce verbosity for noisy third-party loggers
+        logging.getLogger("flet").setLevel(logging.WARNING)
+        logging.getLogger("flet_desktop").setLevel(logging.INFO)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("httpcore.http11").setLevel(logging.WARNING)
+        logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.INFO)  # Keep HTTP requests visible
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
     
     def _finalize_log(self):
         """Rename log file with end time when app closes"""
