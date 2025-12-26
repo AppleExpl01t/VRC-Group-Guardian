@@ -49,6 +49,25 @@ EXE Location: dist/GroupGuardian.exe
 
 Replace X.Y.Z with the actual version number you just built.
 
+## 6. CRITICAL: Provide Release Notes
+
+After EVERY successful build, also provide user-friendly release notes like this:
+
+```
+## 📋 v[VERSION] Release Notes
+
+### 🐛 Bug Fixes
+- [List any bugs fixed in simple, non-technical language]
+
+### ✨ New Features  
+- [List any new features added]
+
+### 🔧 Improvements
+- [List any improvements or optimizations]
+```
+
+Write notes in SIMPLE, USER-FRIENDLY language. Avoid technical jargon.
+
 ## Notes
 - The tag MUST match the version embedded in the EXE
 - Without the correct tag, the auto-updater will not work properly

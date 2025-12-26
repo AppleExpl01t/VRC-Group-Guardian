@@ -224,13 +224,23 @@ class LogWatcher:
             
             val_location = f"{self.current_world_id}:{self.current_instance_id}" if self.current_world_id else ""
             
-            # DB & Emit
+            # Record sighting in user profile database (tracks sightings, known names, etc.)
+            db.record_user_sighting(uid, name)
+            
+            # Log the join event
             db.log_join(uid, name, ts_str, val_location)
             
             if not is_backfill:
+                # Get user profile to include watchlist status in event
+                user_profile = db.get_user_profile(uid)
                 self._emit({
-                    "type": "player_join", "user_id": uid, "display_name": name, 
-                    "timestamp": ts_str
+                    "type": "player_join", 
+                    "user_id": uid, 
+                    "display_name": name, 
+                    "timestamp": ts_str,
+                    "is_watchlisted": user_profile.get('is_watchlisted', False) if user_profile else False,
+                    "sightings_count": user_profile.get('sightings_count', 1) if user_profile else 1,
+                    "note": user_profile.get('note') if user_profile else None
                 })
             return
 
