@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class UpdateService:
     GITHUB_REPO = "AppleExpl01t/VRC-Group-Guardian"
-    CURRENT_VERSION = "1.0.16"  # Enhanced Updater Logic
+    CURRENT_VERSION = "1.0.17"  # Build Maintenance
     
     @staticmethod
     async def check_for_updates():
