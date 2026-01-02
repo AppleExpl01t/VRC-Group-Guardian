@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class UpdateService:
     GITHUB_REPO = "AppleExpl01t/VRC-Group-Guardian"
-    CURRENT_VERSION = "1.0.14"  # Enhanced Database Integrity UI
+    CURRENT_VERSION = "1.0.16"  # Enhanced Updater Logic
     
     @staticmethod
     async def check_for_updates():
@@ -141,77 +141,47 @@ class UpdateService:
     @staticmethod
     def apply_update(new_exe_path: str):
         """
-        Launch the new executable with instructions to replace the old one.
+        Launch the new executable by spawning a detached command window to handle the swap.
         """
         import os
         import sys
         import subprocess
         
-        if getattr(sys, 'frozen', False):
-            current_exe = sys.executable
-        else:
-            logger.warning("Auto-update not supported in dev mode.")
-            return
+        if not getattr(sys, 'frozen', False):
+             logger.warning("Auto-update not supported in dev mode.")
+             return
 
-        # Launch the NEW exe, telling it to delete THIS exe
-        # Argument: --perform-update "Path\To\Old.exe"
-        logger.info(f"Launching new version for swap: {new_exe_path}")
-        subprocess.Popen([new_exe_path, "--perform-update", current_exe])
+        current_exe = sys.executable
+        pid = os.getpid()
+        
+        # Command explanation:
+        # 1. timeout: Wait 2 seconds for main app to close
+        # 2. taskkill: Force kill the main app PID to be sure
+        # 3. del: Delete the original executable
+        # 4. move: Rename the downloaded 'new' exe to the original name
+        # 5. start: Launch the updated original exe
+        cmd = (
+            f'timeout /t 2 /nobreak > NUL & '
+            f'taskkill /F /PID {pid} > NUL 2>&1 & '
+            f'del /f /q "{current_exe}" & '
+            f'move /y "{new_exe_path}" "{current_exe}" & '
+            f'start "" "{current_exe}"'
+        )
+        
+        logger.info(f"Spawning update command: {cmd}")
+        
+        # Spawn detached command window
+        subprocess.Popen(f'start "Updating Group Guardian..." cmd /c "{cmd}"', shell=True)
+        
+        # Exit immediately
         sys.exit(0)
 
     @staticmethod
     def handle_update_process():
         """
-        Called at startup to check if we are the 'updater' process.
-        Returns TRUE if we handled an update and should exit.
+        No longer needed with the external command approach, 
+        but kept for compatibility with main.py if it calls it.
         """
-        import sys
-        import os
-        import time
-        import shutil
-        import subprocess
-
-        if "--perform-update" in sys.argv:
-            try:
-                # We are the NEW process (running as .new usually)
-                old_exe_path = sys.argv[sys.argv.index("--perform-update") + 1]
-                
-                # 1. Wait for old process to exit
-                time.sleep(2) 
-                
-                # 2. Delete the old executable
-                if os.path.exists(old_exe_path):
-                    try:
-                        os.remove(old_exe_path)
-                    except Exception as e:
-                        # If deletion fails, we can't really proceed with a clean swap
-                        # But we are already running the new version...
-                        print(f"Failed to delete old exe: {e}")
-                
-                # 3. Copy OURSELVES to the original name (GroupGuardian.exe)
-                # We are currently running as GroupGuardian_new.exe
-                current_running_path = sys.executable
-                
-                # Check if we are already named correctly (unlikely in this flow)
-                if os.path.abspath(current_running_path) == os.path.abspath(old_exe_path):
-                    return False # Nothing to do?
-                
-                shutil.copy2(current_running_path, old_exe_path)
-                
-                # 4. Launch the restored 'GroupGuardian.exe'
-                subprocess.Popen([old_exe_path])
-                
-                # 5. Exit this temporary process containing the update logic
-                # The OS will clean up this temp file eventually or we leave it 
-                # (Optional: launch a cleanup script for the .new file? Hard to self-delete.)
-                sys.exit(0)
-                
-            except Exception as e:
-                print(f"Update error: {e}")
-                # If update failed, maybe just continue running as the new version?
-                # or exiting? Let's continue running so the user at least has the app.
-                return False
-        
         return False
 
     @staticmethod
