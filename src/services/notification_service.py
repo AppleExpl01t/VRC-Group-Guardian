@@ -137,11 +137,16 @@ class NotificationService:
             # Root folder (where user placed it)
             Path(__file__).parent.parent.parent.parent / self.config.default_sound_filename,
             # Assets folder
+            # Development path (src/services/../../assets)
             Path(__file__).parent.parent.parent.parent / "assets" / self.config.default_sound_filename,
-            # Relative to exe
+            # Relative to exe/cwd
             Path(os.getcwd()) / self.config.default_sound_filename,
             Path(os.getcwd()) / "assets" / self.config.default_sound_filename,
         ]
+        
+        # Add frozen path (PyInstaller)
+        if getattr(sys, 'frozen', False):
+             possible_paths.insert(0, Path(sys._MEIPASS) / "assets" / self.config.default_sound_filename)
         
         for path in possible_paths:
             if path.exists():
