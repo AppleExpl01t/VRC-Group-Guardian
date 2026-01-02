@@ -1,6 +1,6 @@
 [project]
 name = "group-guardian"
-version = "1.0.0"
+version = "1.0.1"
 description = "VRChat Group Moderation Automation Tool"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -12,6 +12,7 @@ dependencies = [
     "loguru>=0.7.0",
     "keyring>=24.0.0",
     "appdirs>=1.4.4",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]

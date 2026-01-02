@@ -1,9 +1,13 @@
 import asyncio
+import logging
 from datetime import datetime
 import flet as ft
 from ..theme import colors, radius, spacing, typography
 from ..components.glass_card import GlassPanel
 from ..components.neon_button import NeonButton, IconButton
+from services.database import get_database
+
+logger = logging.getLogger(__name__)
 
 class InstancesView(ft.Container):
     def __init__(self, group=None, api=None, on_navigate=None, **kwargs):
@@ -12,6 +16,12 @@ class InstancesView(ft.Container):
         self.on_navigate = on_navigate
         self._instances = []
         self._loading = True
+        self._db = get_database()
+        self._auto_close_enabled = False  # Will be loaded from DB
+        
+        is_mobile = kwargs.pop("is_mobile", False)
+        typo = typography.mobile if is_mobile else typography
+        pad = spacing.mobile if is_mobile else spacing
         
         # Main content area for the list
         self._content_area = ft.Column(scroll=ft.ScrollMode.AUTO, expand=True)
@@ -19,36 +29,209 @@ class InstancesView(ft.Container):
         # Get group name for button
         group_name = self.group.get('name', 'Group') if self.group else 'Group'
         
-        # Build initial content structure
+        # Auto-close toggle switch
+        self._auto_close_switch = ft.Switch(
+            value=False,
+            active_color=colors.accent_primary,
+            on_change=self._handle_auto_close_toggle,
+        )
+        
+        # Countdown timer text
+        self._countdown_text = ft.Text("", size=10, color=colors.text_tertiary)
+        self._countdown_seconds = 10  # Will be reset on each poll
+        
+        # Settings row with auto-close toggle
+        auto_close_row = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.SHIELD_ROUNDED, color=colors.accent_secondary, size=20),
+                ft.Column([
+                    ft.Text("Auto-Close Non-Age-Verified", size=typography.size_sm, 
+                            weight=ft.FontWeight.W_600, color=colors.text_primary),
+                    ft.Text("Checks every 10s and closes instances without 18+ verification", 
+                            size=10, color=colors.text_tertiary),
+                ], spacing=0, expand=True),
+                self._auto_close_switch,
+            ], spacing=spacing.sm, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.padding.symmetric(horizontal=spacing.md, vertical=spacing.sm),
+            bgcolor=colors.bg_elevated,
+            border=ft.border.all(1, colors.glass_border),
+            border_radius=radius.sm,
+        )
+        
+        # Refresh status row with countdown
+        self._refresh_status_row = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.REFRESH_ROUNDED, size=14, color=colors.text_tertiary),
+                ft.Text("Auto-refresh:", size=10, color=colors.text_tertiary),
+                self._countdown_text,
+                ft.Container(expand=True),
+                ft.Text("", size=10, color=colors.text_tertiary, ref=ft.Ref[ft.Text]()),  # Instance count placeholder
+            ], spacing=4),
+            padding=ft.padding.symmetric(horizontal=spacing.md, vertical=spacing.xs),
+        )
+        
+        # Build initial content structure - more compact header
         header_row = ft.Row([
             ft.Column([
-                ft.Text("Active Instances", size=typography.size_2xl, weight=ft.FontWeight.W_700, color=colors.text_primary),
-                ft.Text(f"Managing instances for {group_name}", color=colors.text_secondary),
-            ]),
+                ft.Text("Active Instances", size=typo.size_xl, weight=ft.FontWeight.W_700, color=colors.text_primary),  # Reduced from 2xl
+                ft.Text(f"Managing instances for {group_name}", color=colors.text_secondary, size=typo.size_sm),  # Reduced from base
+            ], spacing=0),  # Reduced from default
             ft.Row([
                 NeonButton("Invite Members", icon=ft.Icons.GROUP_ADD_ROUNDED, on_click=lambda e: self._show_group_invite_dialog()),
-                NeonButton(f"Open new {group_name} instance", icon=ft.Icons.ADD_BOX_ROUNDED, variant="primary", on_click=lambda e: self._show_new_instance_dialog())
-            ], spacing=spacing.md)
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
-
+                NeonButton(f"New Instance", icon=ft.Icons.ADD_BOX_ROUNDED, variant="primary", on_click=lambda e: self._show_new_instance_dialog())
+            ], spacing=pad.sm, wrap=True)  # Reduced from md
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True, run_spacing=pad.sm)  # Reduced from md
+        
         content = ft.Column([
             header_row,
-            ft.Container(height=spacing.md),
+            ft.Container(height=pad.xs),  # Reduced from sm
+            auto_close_row,
+            self._refresh_status_row,
+            ft.Container(height=pad.xs),  # Reduced from sm
             self._content_area
         ], expand=True)
         
         super().__init__(
             content=content,
-            padding=spacing.lg,
+            padding=pad.lg,
             expand=True,
             **kwargs
         )
         
+        # Polling state
+        self._polling_task = None
+        self._polling_active = False
+        self._poll_interval_seconds = 10  # Refresh every 10 seconds for real-time updates
+        
     def did_mount(self):
+        # Load auto-close setting from DB
+        if self.group:
+            group_id = self.group.get("id")
+            settings = self._db.get_group_settings(group_id)
+            if settings:
+                self._auto_close_enabled = bool(settings.get("auto_close_non_age_verified", 0))
+                self._auto_close_switch.value = self._auto_close_enabled
+        
         self._update_view()
-        self.page.run_task(self._load_data)
+        # Load fresh data immediately when view mounts (bypass cache)
+        self.page.run_task(self._load_fresh_data)
+        
+        # Start polling and countdown for real-time instance updates
+        self._start_polling()
+    
+    def will_unmount(self):
+        """Clean up polling and countdown tasks when view is unmounted"""
+        self._stop_polling()
+    
+    def _start_polling(self):
+        """Start the background polling task for real-time updates"""
+        if self._polling_active:
+            return
+        self._polling_active = True
+        self._countdown_seconds = self._poll_interval_seconds
+        self._polling_task = self.page.run_task(self._poll_with_countdown)
+        logger.info(f"Started instance refresh (every {self._poll_interval_seconds}s)")
+    
+    def _stop_polling(self):
+        """Stop the background polling task"""
+        self._polling_active = False
+        if self._polling_task:
+            logger.info("Stopped instance refresh")
+            self._polling_task = None
+    
+    def _update_countdown_display(self, text: str):
+        """Update the countdown text display"""
+        self._countdown_text.value = text
+        if self._countdown_text.page:
+            try:
+                self._countdown_text.update()
+            except:
+                pass  # Ignore update errors if view is unmounting
+    
+    async def _poll_with_countdown(self):
+        """
+        Unified polling task that handles both countdown and refresh.
+        Timer only restarts AFTER API has finished responding.
+        """
+        while self._polling_active:
+            try:
+                # Countdown phase: count down from interval to 0
+                self._countdown_seconds = self._poll_interval_seconds
+                
+                while self._countdown_seconds > 0 and self._polling_active:
+                    self._update_countdown_display(f"{self._countdown_seconds}s")
+                    await asyncio.sleep(1)
+                    self._countdown_seconds -= 1
+                
+                if not self._polling_active:
+                    break
+                
+                # Refresh phase: show refreshing indicator
+                self._update_countdown_display("⟳")
+                logger.debug("Refreshing instances...")
+                
+                # Refresh instances from API (bypass cache to get fresh data)
+                if self.api and self.group:
+                    group_id = self.group.get("id")
+                    # Use direct API call to bypass cache
+                    fresh_instances = await self.api.get_group_instances(group_id)
+                    
+                    # Check if view is still mounted before updating
+                    if not self._polling_active or not self.page:
+                        break
+                        
+                    if fresh_instances is not None:  # Allow empty list
+                        self._instances = fresh_instances
+                        self._update_view()
+                        
+                        # If auto-close is enabled, check for non-age-verified instances
+                        if self._auto_close_enabled:
+                            await self._auto_close_non_age_verified_instances()
+                
+                # After API completes, loop continues and countdown restarts
+                        
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error during instance polling: {e}")
+                self._update_countdown_display("!")
+                await asyncio.sleep(5)  # Brief pause on error
+    
+    def _handle_auto_close_toggle(self, e):
+        """Handle toggle of auto-close setting"""
+        if not self.group:
+            return
+        
+        self._auto_close_enabled = e.control.value
+        group_id = self.group.get("id")
+        group_name = self.group.get("name", "Unknown")
+        
+        # Save to database
+        self._db.set_group_auto_close_non_age_verified(group_id, group_name, self._auto_close_enabled)
+        
+        # If enabled, trigger immediate check
+        if self._auto_close_enabled and self._instances:
+            self.page.run_task(self._auto_close_non_age_verified_instances)
+    
+    async def _load_fresh_data(self):
+        """Load fresh data from API (bypasses cache) when view first mounts"""
+        if not self.api or not self.group:
+            self._loading = False
+            self._update_view()
+            return
+            
+        group_id = self.group.get("id")
+        # Bypass cache for immediate fresh data
+        self._instances = await self.api.get_group_instances(group_id)
+        self._loading = False
+        self._update_view()
+        
+        # If auto-close is enabled, check instances after loading
+        if self._auto_close_enabled:
+            await self._auto_close_non_age_verified_instances()
         
     async def _load_data(self):
+        """Load data (can use cache)"""
         if not self.api or not self.group:
             self._loading = False
             self._update_view()
@@ -59,10 +242,54 @@ class InstancesView(ft.Container):
         self._loading = False
         self._update_view()
         
+        # If auto-close is enabled, check instances after loading
+        if self._auto_close_enabled:
+            await self._auto_close_non_age_verified_instances()
+    
+    async def _auto_close_non_age_verified_instances(self):
+        """Auto-close instances that don't have the ~ageGate modifier"""
+        if not self._instances or not self.api:
+            return
+        
+        closed_count = 0
+        for inst in self._instances:
+            location = inst.get("location", "")
+            
+            # Check if instance has age verification (ageGate modifier)
+            if "~ageGate" not in location:
+                # Parse world_id and instance_id
+                if ":" in location:
+                    parts = location.split(":", 1)
+                    world_id = parts[0]
+                    instance_id = parts[1] if len(parts) > 1 else ""
+                    
+                    world_name = inst.get("world", {}).get("name", "Unknown World")
+                    logger.info(f"Auto-closing non-age-verified instance: {world_name}")
+                    
+                    # Close the instance
+                    success = await self.api.close_group_instance(world_id, instance_id)
+                    if success:
+                        closed_count += 1
+                        logger.info(f"Successfully auto-closed: {world_name}")
+                    else:
+                        logger.warning(f"Failed to auto-close: {world_name}")
+                    
+                    # Small delay between closes to avoid rate limiting
+                    await asyncio.sleep(0.5)
+        
+        # Refresh the view if any instances were closed
+        if closed_count > 0:
+            logger.info(f"Auto-closed {closed_count} non-age-verified instance(s)")
+            # Reload instances
+            group_id = self.group.get("id")
+            self._instances = await self.api.get_cached_group_instances(group_id)
+            self._update_view()
+        
     def _update_view(self):
         """Update the content area with current state"""
         self._content_area.controls = self._get_content_controls()
-        self.update()
+        if self.page:
+            self.update()
         
     def _get_content_controls(self):
         """Get the list of controls for the content area"""
@@ -109,18 +336,44 @@ class InstancesView(ft.Container):
                 world_id = parts[0]
                 instance_id = parts[1] if len(parts) > 1 else ""
                 
+            # Check age verification status
+            is_age_verified = "~ageGate" in location
+            
+            # Age verification badge
+            age_badge = ft.Container(
+                content=ft.Row([
+                    ft.Icon(
+                        ft.Icons.VERIFIED_ROUNDED if is_age_verified else ft.Icons.WARNING_ROUNDED,
+                        size=12,
+                        color=colors.success if is_age_verified else colors.warning,
+                    ),
+                    ft.Text(
+                        "18+" if is_age_verified else "All Ages",
+                        size=9,
+                        color=colors.success if is_age_verified else colors.warning,
+                        weight=ft.FontWeight.W_600,
+                    ),
+                ], spacing=2),
+                padding=ft.padding.symmetric(horizontal=6, vertical=2),
+                bgcolor=f"{colors.success}20" if is_age_verified else f"{colors.warning}20",
+                border_radius=4,
+            )
+            
             row = ft.Container(
                 content=ft.Row([
                     ft.Icon(ft.Icons.PUBLIC_ROUNDED, color=colors.text_secondary),
                     ft.Column([
-                        ft.Text(name, color=colors.text_primary, weight=ft.FontWeight.BOLD),
+                        ft.Row([
+                            ft.Text(name, color=colors.text_primary, weight=ft.FontWeight.BOLD),
+                            age_badge,
+                        ], spacing=spacing.xs),
                         # Hide raw location, show simplified info
                         ft.Text(f"Region: {region} • {count} active", color=colors.text_tertiary, size=12),
                     ], expand=True, spacing=2),
                     ft.Container(
                         content=ft.Text(region, size=10, color=colors.text_tertiary),
                         padding=ft.padding.symmetric(horizontal=6, vertical=2),
-                        border=ft.border.all(1, colors.glass_border),
+                        border=ft.border.all(2, colors.glass_border),
                         border_radius=4,
                     ),
                     ft.Text(f"{count} users", color=colors.accent_secondary, weight=ft.FontWeight.BOLD),
@@ -132,7 +385,7 @@ class InstancesView(ft.Container):
                     ),
                 ], spacing=spacing.sm),
                 padding=spacing.md,
-                border=ft.border.all(1, colors.glass_border),
+                border=ft.border.all(2, colors.glass_border),
                 bgcolor=colors.bg_elevated,
                 border_radius=radius.md,
                 margin=ft.margin.only(bottom=spacing.sm),
@@ -180,11 +433,11 @@ class InstancesView(ft.Container):
         
         search_results_container = ft.Container(
             content=search_results,
-            height=200,
-            border=ft.border.all(1, colors.glass_border),
+            height=150,  # Reduced from 200
+            border=ft.border.all(2, colors.glass_border),
             border_radius=radius.md,
             bgcolor=colors.bg_base,
-            padding=spacing.sm,
+            padding=spacing.xs,  # Reduced from sm
         )
         
         # Selected world display
@@ -223,7 +476,7 @@ class InstancesView(ft.Container):
                     ft.Icon(ft.Icons.CHECK_CIRCLE_ROUNDED, color=colors.success, size=20),
                 ], spacing=spacing.sm)
                 selected_world_display.bgcolor = colors.success + "22"
-                selected_world_display.border = ft.border.all(1, colors.success + "44")
+                selected_world_display.border = ft.border.all(2, colors.success + "44")
                 selected_world_display.border_radius = radius.md
             else:
                 selected_world_display.content = ft.Text("No world selected", color=colors.text_tertiary, italic=True)
@@ -277,7 +530,7 @@ class InstancesView(ft.Container):
                 padding=spacing.sm,
                 border_radius=radius.md,
                 bgcolor=colors.bg_elevated,
-                border=ft.border.all(1, colors.glass_border),
+                border=ft.border.all(2, colors.glass_border),
                 on_click=lambda e, w=world: select_world(w),
                 ink=True,
             )
@@ -318,7 +571,7 @@ class InstancesView(ft.Container):
                     search_results.update()
                     
             except Exception as e:
-                print(f"World search error: {e}")
+                logger.warning(f"World search error: {e}")
                 loading_indicator.visible = False
                 search_results.controls = [
                     ft.Text(f"Search error: {str(e)}", color=colors.danger)
@@ -468,7 +721,7 @@ class InstancesView(ft.Container):
         self.page.open(ft.SnackBar(ft.Text("Creating instance..."), bgcolor=colors.bg_elevated))
         
         group_id = self.group.get("id")
-        print(f"[DEBUG] Creating instance: world={world_id}, region={region}, access={access}, queue={queue}, age={age_gate}, name={name}, group={group_id}")
+        logger.debug(f"Creating instance: world={world_id}, region={region}, access={access}, queue={queue}, age={age_gate}, name={name}, group={group_id}")
         
         try:
             res = await self.api.create_instance(
@@ -481,20 +734,41 @@ class InstancesView(ft.Container):
                 age_gate=age_gate,
                 name=name
             )
-            print(f"[DEBUG] Create instance result: {res}")
+            logger.debug(f"Create instance result: {res}")
             
-            if res:
+            if res and not res.get("error"):
+                # Log full response for debugging
+                logger.info(f"Instance creation success! Full response: {res}")
+                
                 # Get instance info for display and self-invite
-                location = res.get("location") or res.get("id") or ""
+                # VRChat returns: { location: "wrld_xxx:instanceId~group(...)~region(...)", id: "...", instanceId: "...", ... }
+                location = res.get("location") or ""
                 instance_id = res.get("instanceId") or ""
                 short_name = res.get("shortName") or ""
                 world_name = res.get("world", {}).get("name", "") or res.get("name", "") or "Instance"
                 
-                # Parse location to get instance ID if needed
-                if ":" in location and not instance_id:
-                    instance_id = location.split(":", 1)[1]
+                # If we have location but no instanceId, parse it from location
+                # Location format: "wrld_xxx:12345~group(grp_xxx)~region(us)"
+                if location and ":" in location:
+                    parts = location.split(":", 1)
+                    parsed_world_id = parts[0]
+                    parsed_instance_id = parts[1] if len(parts) > 1 else ""
+                    
+                    if not instance_id and parsed_instance_id:
+                        instance_id = parsed_instance_id
+                    
+                    # Use parsed world_id if our input was empty somehow
+                    if parsed_world_id.startswith("wrld_"):
+                        world_id = parsed_world_id
                 
-                print(f"[DEBUG] Instance created: location={location}, instanceId={instance_id}, world={world_name}")
+                # Also try 'id' field if it looks like a location
+                if not location and res.get("id") and ":" in str(res.get("id")):
+                    location = res.get("id")
+                    parts = location.split(":", 1)
+                    if not instance_id and len(parts) > 1:
+                        instance_id = parts[1]
+                
+                logger.info(f"Parsed instance: location={location}, instanceId={instance_id}, worldId={world_id}")
                 
                 # Invalidate instances cache
                 self.api.invalidate_instances_cache(group_id)
@@ -502,11 +776,15 @@ class InstancesView(ft.Container):
                 # Try to send self-invite so user can join
                 invite_sent = False
                 if instance_id:
-                    invite_sent = await self.api.self_invite(world_id, instance_id, short_name)
-                    print(f"[DEBUG] Self-invite sent: {invite_sent}")
+                    # self_invite(world_id, instance_id) - no short_name parameter
+                    invite_sent = await self.api.self_invite(world_id, instance_id)
+                    logger.info(f"Self-invite result: {invite_sent}")
                 
-                # Build VRChat launch link
-                launch_link = f"vrchat://launch?worldId={world_id}&instanceId={instance_id}" if instance_id else None
+                # Build VRChat launch link - instanceId should include all modifiers
+                launch_link = None
+                if world_id and instance_id:
+                    launch_link = f"vrchat://launch?worldId={world_id}&instanceId={instance_id}"
+                    logger.info(f"Launch link: {launch_link}")
                 
                 # Show success dialog with instance info
                 self._show_instance_created_dialog(world_name, location, launch_link, invite_sent)
@@ -514,12 +792,17 @@ class InstancesView(ft.Container):
                 self._loading = True
                 self._update_view()
                 await self._load_data()
+            elif res and res.get("error"):
+                # API returned an error with details
+                error_msg = res.get("message", "Unknown error")
+                logger.warning(f"API error: {error_msg}")
+                self.page.open(ft.SnackBar(ft.Text(f"Failed to create instance: {error_msg}"), bgcolor=colors.danger))
             else:
-                print(f"[DEBUG] API returned None - instance creation failed")
+                logger.warning("API returned None - instance creation failed")
                 self.page.open(ft.SnackBar(ft.Text("Failed to create instance (API returned None)"), bgcolor=colors.danger))
         except Exception as e:
             import traceback
-            print(f"[DEBUG] Create instance error: {e}")
+            logger.error(f"Create instance error: {e}")
             traceback.print_exc()
             self.page.open(ft.SnackBar(ft.Text(f"Error: {str(e)}"), bgcolor=colors.danger))
     
@@ -579,59 +862,35 @@ class InstancesView(ft.Container):
     
     def _show_close_confirmation(self, location: str, world_name: str, world_id: str, instance_id: str):
         """Show confirmation dialog before closing an instance"""
+        from ..dialogs.confirm_dialog import show_confirm_dialog
         
-        def close_dlg(e):
-            self.page.close(dlg)
+        def do_close():
+            async def close_task():
+                await self._close_instance(world_id, instance_id, world_name)
+            self.page.run_task(close_task)
         
-        def confirm_close(e):
-            self.page.close(dlg)
-            self.page.run_task(lambda: self._close_instance(world_id, instance_id, world_name))
-        
-        dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Row([
-                ft.Icon(ft.Icons.WARNING_ROUNDED, color=colors.danger, size=28),
-                ft.Container(width=spacing.sm),
-                ft.Text("Close Instance?", weight=ft.FontWeight.W_600),
-            ]),
+        # Build details content showing the world info
+        details_content = ft.Container(
             content=ft.Column([
-                ft.Text(
-                    f"Are you sure you want to close this instance?",
-                    color=colors.text_primary,
-                    size=typography.size_base,
-                ),
-                ft.Container(height=spacing.sm),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text(world_name, weight=ft.FontWeight.BOLD, color=colors.text_primary),
-                        # Hidden ID/Location
-                        ft.Text("Public Group Instance", color=colors.text_tertiary, size=12),
-                    ], spacing=2),
-                    padding=spacing.md,
-                    bgcolor=colors.bg_base,
-                    border_radius=radius.md,
-                ),
-                ft.Container(height=spacing.md),
-                ft.Text(
-                    "⚠️ All users in this instance will be disconnected.",
-                    color=colors.warning,
-                    size=typography.size_sm,
-                ),
-            ], tight=True, width=400),
-            actions=[
-                ft.TextButton("Cancel", on_click=close_dlg),
-                NeonButton(
-                    text="Close Instance",
-                    icon=ft.Icons.CLOSE_ROUNDED,
-                    variant=NeonButton.VARIANT_DANGER,
-                    on_click=confirm_close,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_elevated,
-            shape=ft.RoundedRectangleBorder(radius=radius.lg),
+                ft.Text(world_name, weight=ft.FontWeight.BOLD, color=colors.text_primary),
+                ft.Text("Public Group Instance", color=colors.text_tertiary, size=12),
+            ], spacing=2),
+            padding=spacing.md,
+            bgcolor=colors.bg_base,
+            border_radius=radius.md,
         )
-        self.page.open(dlg)
+        
+        show_confirm_dialog(
+            self.page,
+            title="Close Instance?",
+            message="Are you sure you want to close this instance?",
+            on_confirm=do_close,
+            confirm_text="Close Instance",
+            variant="danger",
+            icon=ft.Icons.WARNING_ROUNDED,
+            details_content=details_content,
+            warning_text="All users in this instance will be disconnected.",
+        )
     
     async def _close_instance(self, world_id: str, instance_id: str, world_name: str):
         """Close the instance via API"""

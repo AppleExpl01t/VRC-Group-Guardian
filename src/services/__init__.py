@@ -6,3 +6,18 @@ from services.websocket_pipeline import (
     connect_pipeline, 
     disconnect_pipeline
 )
+from services.instance_context import (
+    InstanceContextService,
+    InstanceContextState,
+    InstanceContext,
+    InstanceDetails,
+    get_instance_context,
+)
+from services.xsoverlay import (
+    XSOverlayService,
+    XSOverlayConfig,
+    PerformanceData,
+    get_xsoverlay_service,
+    connect_xsoverlay,
+    disconnect_xsoverlay,
+)

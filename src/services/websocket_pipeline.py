@@ -101,40 +101,54 @@ class VRChatPipeline:
         return self._websocket is not None and self._websocket.open
     
     async def _connection_loop(self):
-        """Main connection loop with auto-reconnect"""
+        """Main connection loop with auto-reconnect and exponential backoff"""
+        reconnect_delay = self._reconnect_delay  # Start with base delay
+        max_delay = 60  # Cap at 60 seconds
+        
         while self._running:
             try:
                 url = f"{PIPELINE_URL}/?auth={self._auth_token}"
                 
+                logger.info(f"Connecting to pipeline...")
                 async with websockets.connect(
                     url,
                     ping_interval=30,
                     ping_timeout=10,
-                    close_timeout=5
+                    close_timeout=5,
+                    additional_headers={
+                        "User-Agent": "GroupGuardian/1.0.0 (VRChat Moderation Tool)"
+                    }
                 ) as ws:
                     self._websocket = ws
-                    logger.info("Pipeline connected")
+                    logger.info("Pipeline connected successfully")
                     self._emit("connected", {"timestamp": datetime.now().isoformat()})
+                    
+                    # Reset reconnect delay on successful connection
+                    reconnect_delay = self._reconnect_delay
                     
                     # Listen for messages
                     async for message in ws:
                         await self._handle_message(message)
                         
             except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"Pipeline connection closed: {e}")
+                logger.warning(f"Pipeline connection closed: {e.code} {e.reason}")
+            except websockets.exceptions.InvalidStatusCode as e:
+                logger.warning(f"Pipeline rejected WebSocket connection: HTTP {e.status_code}")
             except asyncio.CancelledError:
                 logger.debug("Pipeline connection cancelled")
                 break
             except Exception as e:
-                logger.error(f"Pipeline error: {e}")
+                logger.error(f"Pipeline error: {type(e).__name__}: {e}")
             
             # Connection lost
             self._websocket = None
             self._emit("disconnected", {"timestamp": datetime.now().isoformat()})
             
             if self._running:
-                logger.info(f"Reconnecting in {self._reconnect_delay}s...")
-                await asyncio.sleep(self._reconnect_delay)
+                logger.info(f"Reconnecting in {reconnect_delay}s...")
+                await asyncio.sleep(reconnect_delay)
+                # Exponential backoff (double delay, capped at max)
+                reconnect_delay = min(reconnect_delay * 2, max_delay)
     
     async def _handle_message(self, raw_message: str):
         """Parse and handle a pipeline message"""

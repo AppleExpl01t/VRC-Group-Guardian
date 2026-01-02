@@ -5,103 +5,29 @@ Manage watchlisted users, tags, and alert settings.
 """
 
 import flet as ft
+import logging
 from datetime import datetime
 from typing import Optional, List, Dict
 from ..theme import colors, radius, spacing, typography, shadows
 from ..components.glass_card import GlassCard, GlassPanel
 from ..components.neon_button import NeonButton, IconButton
 from ..components.user_card import UserCard
+from ..components.tag_chip import TagChip
 from ..dialogs.user_details import show_user_details_dialog
+from ..dialogs.confirm_dialog import show_confirm_dialog
+from ..mixins import SearchableListMixin
 from services.database import get_database
 from services.watchlist_alerts import get_alert_service, DEFAULT_TAGS
+from services.watchlist_service import get_watchlist_service
+from services.event_bus import get_event_bus
 
-
-class TagChip(ft.Container):
-    """A clickable tag chip with emoji and color"""
-    
-    def __init__(
-        self,
-        tag_name: str,
-        emoji: str = "🏷️",
-        color: str = colors.accent_primary,
-        selected: bool = False,
-        on_click=None,
-        removable: bool = False,
-        on_remove=None,
-        **kwargs
-    ):
-        self.tag_name = tag_name
-        self.emoji = emoji
-        self.tag_color = color
-        self.selected = selected
-        self._on_click = on_click
-        self.removable = removable
-        self._on_remove = on_remove
-        
-        content = self._build_content()
-        
-        super().__init__(
-            content=content,
-            padding=ft.padding.symmetric(horizontal=spacing.sm, vertical=4),
-            border_radius=radius.full,
-            bgcolor=f"{color}33" if selected else colors.bg_elevated,
-            border=ft.border.all(1, color if selected else colors.glass_border),
-            on_click=self._handle_click if on_click else None,
-            on_hover=self._on_hover if on_click else None,
-            animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
-            **kwargs
-        )
-    
-    def _build_content(self):
-        controls = [
-            ft.Text(self.emoji, size=12),
-            ft.Text(
-                self.tag_name,
-                size=typography.size_xs,
-                color=colors.text_primary if self.selected else colors.text_secondary,
-                weight=ft.FontWeight.W_500 if self.selected else ft.FontWeight.W_400,
-            ),
-        ]
-        
-        if self.removable:
-            controls.append(
-                ft.Container(
-                    content=ft.Icon(ft.Icons.CLOSE, size=12, color=colors.text_tertiary),
-                    on_click=self._handle_remove,
-                    padding=ft.padding.only(left=4),
-                )
-            )
-        
-        return ft.Row(controls, spacing=4, tight=True)
-    
-    def _handle_click(self, e):
-        if self._on_click:
-            self._on_click(self.tag_name)
-    
-    def _handle_remove(self, e):
-        if self._on_remove:
-            e.control.data = self.tag_name  # Pass tag name
-            self._on_remove(e)
-    
-    def _on_hover(self, e):
-        if e.data == "true":
-            self.bgcolor = f"{self.tag_color}44"
-        else:
-            self.bgcolor = f"{self.tag_color}33" if self.selected else colors.bg_elevated
-        self.update()
-    
-    def set_selected(self, selected: bool):
-        self.selected = selected
-        self.bgcolor = f"{self.tag_color}33" if selected else colors.bg_elevated
-        self.border = ft.border.all(1, self.tag_color if selected else colors.glass_border)
-        self.content = self._build_content()
-        self.update()
+logger = logging.getLogger(__name__)
 
 
 
 
 
-class WatchlistView(ft.Container):
+class WatchlistView(ft.Container, SearchableListMixin):
     """
     Main watchlist management view.
     Features:
@@ -118,9 +44,10 @@ class WatchlistView(ft.Container):
         self._alert_service = get_alert_service()
         
         # State
-        self._users = []
-        self._search_query = ""
         self._selected_tag_filter = None
+        
+        # Initialize mixin
+        self._setup_search_mixin()
         
         # Tag info lookup
         self._tag_info = {t["name"]: t for t in DEFAULT_TAGS}
@@ -128,7 +55,6 @@ class WatchlistView(ft.Container):
         # UI Refs
         self._user_list = None
         self._stats_row = None
-        self._search_field = None
         
         content = self._build_view()
         
@@ -142,21 +68,33 @@ class WatchlistView(ft.Container):
     def did_mount(self):
         """Load watchlist data on mount"""
         self._load_watchlist()
+        get_event_bus().subscribe("watchlist_updated", self._on_watchlist_update)
+        get_event_bus().subscribe("user_updated", self._on_watchlist_update)
+
+    def will_unmount(self):
+        get_event_bus().unsubscribe("watchlist_updated", self._on_watchlist_update)
+        get_event_bus().unsubscribe("user_updated", self._on_watchlist_update)
+
+    def _on_watchlist_update(self, data):
+        """Reload list on external updates"""
+        if self.page:
+            self._load_watchlist()
     
     def _load_watchlist(self):
         """Load all watchlisted users from database"""
-        self._users = self._db.get_watchlisted_users()
-        self._update_stats()
-        self._render_user_list()
+        users = self._db.get_watchlisted_users()
+        self._update_stats_from_users(users)
+        self._set_items(users)
+        self._render_list()
     
-    def _update_stats(self):
+    def _update_stats_from_users(self, users):
         """Update statistics display"""
         if not self._stats_row:
             return
         
         # Count users by tag
         tag_counts = {}
-        for user in self._users:
+        for user in users:
             tags = user.get("tags", [])
             if isinstance(tags, str):
                 import json
@@ -175,7 +113,7 @@ class WatchlistView(ft.Container):
         # Total count
         stats.append(self._build_stat_card(
             icon=ft.Icons.VISIBILITY_ROUNDED,
-            value=str(len(self._users)),
+            value=str(len(users)),
             label="Monitored",
             color=colors.accent_primary
         ))
@@ -222,31 +160,42 @@ class WatchlistView(ft.Container):
             height=100,
         )
     
-    def _render_user_list(self):
+    def _apply_filter(self):
+        """Override filter to include tag filtering"""
+        query = self._search_query.lower()
+        items = self._all_items
+        
+        # Apply Search
+        if query:
+             items = [i for i in items if 
+                      query in i.get("username", "").lower() or 
+                      query in i.get("user_id", "").lower()]
+             
+        # Apply Tags
+        if self._selected_tag_filter:
+             items = [i for i in items if self._has_tag(i, self._selected_tag_filter)]
+             
+        self._filtered_items = items
+        self._render_list()
+
+    def _has_tag(self, user, tag_name):
+        tags = user.get("tags", [])
+        if isinstance(tags, str):
+            import json
+            try:
+                tags = json.loads(tags)
+            except:
+                tags = []
+        return tag_name in tags
+
+    def _render_list(self):
         """Render the user list with current filters"""
         if not self._user_list:
             return
         
         # Apply search filter
-        filtered = self._users
-        if self._search_query:
-            query = self._search_query.lower()
-            filtered = [u for u in filtered if 
-                        query in u.get("username", "").lower() or 
-                        query in u.get("user_id", "").lower()]
-        
-        # Apply tag filter
-        if self._selected_tag_filter:
-            def has_tag(user):
-                tags = user.get("tags", [])
-                if isinstance(tags, str):
-                    import json
-                    try:
-                        tags = json.loads(tags)
-                    except:
-                        tags = []
-                return self._selected_tag_filter in tags
-            filtered = [u for u in filtered if has_tag(u)]
+        # Use _filtered_items from mixin/custom filter
+        filtered = self._filtered_items
         
         if not filtered:
             self._user_list.controls = [
@@ -320,10 +269,7 @@ class WatchlistView(ft.Container):
         
         self._user_list.update()
     
-    def _handle_search(self, e):
-        """Handle search input"""
-        self._search_query = e.control.value
-        self._render_user_list()
+
     
     def _handle_tag_filter(self, tag_name: str):
         """Handle tag filter selection"""
@@ -331,7 +277,11 @@ class WatchlistView(ft.Container):
             self._selected_tag_filter = None  # Toggle off
         else:
             self._selected_tag_filter = tag_name
-        self._render_user_list()
+        self._apply_filter()
+        
+    def _clear_filter(self):
+        self._selected_tag_filter = None
+        self._apply_filter()
     
     def _show_add_dialog(self):
         """Show dialog to add a user to the watchlist"""
@@ -398,7 +348,8 @@ class WatchlistView(ft.Container):
                     search_results_col.visible = True
                 search_results_col.update()
             except Exception as ex:
-                print(f"Search error: {ex}")
+                logger.error(f"Search error: {ex}")
+                self.page.open(ft.SnackBar(content=ft.Text(f"Search failed: {ex}"), bgcolor=colors.danger))
         
         def search_user(e):
             query = search_field.value.strip()
@@ -490,11 +441,15 @@ class WatchlistView(ft.Container):
                 self.page.update()
                 return
             
-            # Add to database
-            self._db.record_user_sighting(user_id, username)
-            self._db.toggle_watchlist(user_id, True)
+            # Add to watchlist using centralized service
+            watchlist_svc = get_watchlist_service()
+            watchlist_svc.check_and_record_user(user_id, username)  # Ensure user is recorded
+            watchlist_svc.toggle_watchlist(user_id, True, username=username)
+            
             if note:
-                self._db.set_user_note(user_id, note)
+                watchlist_svc.set_user_note(user_id, note, username=username)
+            
+            # Tags still need direct DB access
             for tag in selected_tags:
                 self._db.add_user_tag(user_id, tag)
             
@@ -662,9 +617,10 @@ class WatchlistView(ft.Container):
     
     def _confirm_remove(self, user_id: str, username: str):
         """Show confirmation before removing from watchlist"""
-        def do_remove(e):
-            self._db.toggle_watchlist(user_id, False)
-            self.page.close(dlg)
+        def do_remove():
+            # Use watchlist service for centralized management
+            watchlist_svc = get_watchlist_service()
+            watchlist_svc.toggle_watchlist(user_id, False, username=username)
             self._load_watchlist()
             
             self.page.snack_bar = ft.SnackBar(
@@ -674,34 +630,21 @@ class WatchlistView(ft.Container):
             self.page.snack_bar.open = True
             self.page.update()
         
-        dlg = ft.AlertDialog(
-            modal=True,
-            title=ft.Row([
-                ft.Icon(ft.Icons.WARNING_ROUNDED, color=colors.warning),
-                ft.Text("Remove from Watchlist?", weight=ft.FontWeight.W_600),
-            ], spacing=spacing.sm),
-            content=ft.Text(
-                f"Are you sure you want to remove {username} from your watchlist?\n\n"
-                "Their notes and tags will be preserved in case you add them back later.",
-                color=colors.text_secondary,
-            ),
-            actions=[
-                ft.TextButton("Cancel", on_click=lambda e: self.page.close(dlg)),
-                NeonButton("Remove", icon=ft.Icons.DELETE, variant="danger", on_click=do_remove),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=colors.bg_elevated,
-            shape=ft.RoundedRectangleBorder(radius=radius.lg),
+        show_confirm_dialog(
+            self.page,
+            title="Remove from Watchlist?",
+            message=f"Are you sure you want to remove {username} from your watchlist?\n\nTheir notes and tags will be preserved in case you add them back later.",
+            on_confirm=do_remove,
+            confirm_text="Remove",
+            variant="danger",
+            icon=ft.Icons.WARNING_ROUNDED
         )
-        
-        self.page.open(dlg)
     
     def _toggle_alerts(self, e):
         """Toggle alert service enabled state"""
         if self._alert_service:
-            # Use the switch value directly
             self._alert_service.enabled = e.control.value
-            self._update_stats()
+            self._update_stats_from_users(self._all_items)
             
             status = "enabled" if self._alert_service.enabled else "disabled"
             self.page.snack_bar = ft.SnackBar(
@@ -782,23 +725,23 @@ class WatchlistView(ft.Container):
             self.page.run_task(do_test)
     
     def _build_view(self):
-        """Build the main view layout"""
+        """Build the main view layout - compact version"""
         
-        # Header
+        # Header - more compact
         header = ft.Row([
             ft.Column([
                 ft.Text(
                     "Watchlist Management",
-                    size=typography.size_2xl,
+                    size=typography.size_xl,  # Reduced from 2xl
                     weight=ft.FontWeight.W_700,
                     color=colors.text_primary,
                 ),
                 ft.Text(
                     "Monitor users and receive in-game alerts",
-                    size=typography.size_base,
+                    size=typography.size_sm,  # Reduced from base
                     color=colors.text_secondary,
                 ),
-            ], spacing=spacing.xs),
+            ], spacing=0),  # Reduced from xs
             ft.Row([
                 NeonButton(
                     "Add User",
@@ -806,25 +749,22 @@ class WatchlistView(ft.Container):
                     variant=NeonButton.VARIANT_PRIMARY,
                     on_click=lambda e: self._show_add_dialog(),
                 ),
-            ], spacing=spacing.md),
+            ], spacing=spacing.sm),  # Reduced from md
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         
-        # Stats row
-        self._stats_row = ft.Row(spacing=spacing.md, scroll=ft.ScrollMode.AUTO)
+        # Stats row - with less spacing
+        self._stats_row = ft.Row(spacing=spacing.sm, scroll=ft.ScrollMode.AUTO)  # Reduced from md
         
         # Search and filter bar
-        self._search_field = ft.TextField(
-            prefix_icon=ft.Icons.SEARCH,
-            hint_text="Search by username or ID...",
-            border_color=colors.glass_border,
-            focused_border_color=colors.accent_primary,
-            on_change=self._handle_search,
+        search_field = self._create_search_field(
+            placeholder="Search by username or ID...",
             expand=True,
+            key="watchlist_search"
         )
         
         filter_row = ft.Row([
-            self._search_field,
-            ft.Container(width=spacing.md),
+            search_field,
+            ft.Container(width=spacing.sm),  # Reduced from md
             ft.PopupMenuButton(
                 icon=ft.Icons.FILTER_LIST_ROUNDED,
                 tooltip="Filter by tag",
@@ -843,10 +783,12 @@ class WatchlistView(ft.Container):
             ),
         ])
         
-        # User list
-        self._user_list = ft.Column(
-            spacing=spacing.sm,
-            scroll=ft.ScrollMode.AUTO,
+        # User list - tighter grid
+        self._user_list = ft.GridView(
+            max_extent=220,  # Reduced from 240
+            child_aspect_ratio=1.05,  # Slightly taller ratio for compact cards
+            spacing=spacing.sm,  # Reduced from md
+            run_spacing=spacing.sm,  # Reduced from md
             expand=True,
         )
         
@@ -860,58 +802,58 @@ class WatchlistView(ft.Container):
         alert_panel = GlassPanel(
             content=ft.Column([
                 ft.Row([
-                    ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE_ROUNDED, color=colors.accent_secondary, size=20),
-                    ft.Text("Alert Settings", weight=ft.FontWeight.W_600, expand=True),
+                    ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE_ROUNDED, color=colors.accent_secondary, size=18),
+                    ft.Text("Alert Settings", weight=ft.FontWeight.W_600, expand=True, size=typography.size_sm),
                     self._alert_switch,
                 ]),
                 ft.Text(
-                    "When enabled, you'll receive in-game invite notifications when watchlisted users join your instance.",
-                    size=typography.size_sm,
+                    "Get in-game alerts when watchlisted users join your instance.",
+                    size=typography.size_xs,  # Reduced from sm
                     color=colors.text_tertiary,
                 ),
-                ft.Container(height=spacing.sm),
+                ft.Container(height=spacing.xs),  # Reduced from sm
                 NeonButton(
-                    "Send Test Alert",
+                    "Test Alert",
                     icon=ft.Icons.SEND_ROUNDED,
                     variant=NeonButton.VARIANT_SECONDARY,
                     on_click=self._send_test_alert,
-                    height=36,
+                    height=32,  # Reduced from 36
                 ),
-            ], spacing=spacing.sm),
+            ], spacing=spacing.xs),  # Reduced from sm
         )
         
-        # Main layout
+        # Main layout - with reduced spacing
         return ft.Column([
             header,
-            ft.Container(height=spacing.md),
+            ft.Container(height=spacing.sm),  # Reduced from md
             self._stats_row,
-            ft.Container(height=spacing.md),
+            ft.Container(height=spacing.sm),  # Reduced from md
             filter_row,
-            ft.Container(height=spacing.md),
+            ft.Container(height=spacing.sm),  # Reduced from md
             ft.Row([
                 ft.Container(
                     content=self._user_list,
                     expand=2,
                 ),
-                ft.Container(width=spacing.md),
+                ft.Container(width=spacing.sm),  # Reduced from md
                 ft.Column([
                     alert_panel,
-                    ft.Container(height=spacing.md),
+                    ft.Container(height=spacing.sm),  # Reduced from md
                     GlassPanel(
                         content=ft.Column([
                             ft.Row([
-                                ft.Icon(ft.Icons.LABEL_ROUNDED, color=colors.accent_primary, size=18),
-                                ft.Text("Available Tags", weight=ft.FontWeight.W_600),
-                            ], spacing=spacing.sm),
-                            ft.Divider(color=colors.glass_border),
+                                ft.Icon(ft.Icons.LABEL_ROUNDED, color=colors.accent_primary, size=16),  # Reduced from 18
+                                ft.Text("Available Tags", weight=ft.FontWeight.W_600, size=typography.size_sm),
+                            ], spacing=spacing.xs),  # Reduced from sm
+                            ft.Divider(color=colors.glass_border, height=spacing.sm),
                             ft.Column([
                                 ft.Row([
-                                    ft.Text(t["emoji"], size=16),
-                                    ft.Text(t["name"], weight=ft.FontWeight.W_500, color=colors.text_primary, expand=True),
-                                ], spacing=spacing.sm)
+                                    ft.Text(t["emoji"], size=14),  # Reduced from 16
+                                    ft.Text(t["name"], weight=ft.FontWeight.W_500, color=colors.text_primary, expand=True, size=typography.size_xs),  # Reduced
+                                ], spacing=spacing.xs)  # Reduced from sm
                                 for t in DEFAULT_TAGS
                             ], spacing=spacing.xs, scroll=ft.ScrollMode.AUTO),
-                        ], spacing=spacing.sm),
+                        ], spacing=spacing.xs),  # Reduced from sm
                         expand=True,
                     ),
                 ], expand=1, spacing=0),
@@ -921,4 +863,4 @@ class WatchlistView(ft.Container):
     def _clear_filter(self):
         """Clear tag filter"""
         self._selected_tag_filter = None
-        self._render_user_list()
+        self._apply_filter()

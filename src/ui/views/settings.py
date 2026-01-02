@@ -9,6 +9,8 @@ from ..theme import colors, radius, spacing, typography, shadows
 from ..components.glass_card import GlassCard, GlassPanel
 from ..components.neon_button import NeonButton
 from services.updater import UpdateService
+from services.watchlist_alerts import get_alert_service
+from services.notification_service import get_notification_service
 
 class SettingsView(ft.Container):
     """
@@ -18,11 +20,15 @@ class SettingsView(ft.Container):
     - Account (Placeholder)
     """
     
-    def __init__(self, api=None, on_navigate=None, **kwargs):
+    def __init__(self, api=None, on_navigate=None, on_theme_change=None, **kwargs):
         self.api = api
         self.on_navigate = on_navigate
+        self.on_theme_change = on_theme_change  # Callback for when theme color changes
         self._theme_settings_control = None
         self._custom_color_field = None
+        
+        # File Picker for custom sounds
+        self._file_picker = ft.FilePicker(on_result=self._handle_file_picker_result)
         
         # Developer Profile Data
         self._dev_profile_data = None
@@ -39,6 +45,10 @@ class SettingsView(ft.Container):
 
     def did_mount(self):
         """Fetch developer profile on mount"""
+        # Register file picker
+        self.page.overlay.append(self._file_picker)
+        self.page.update()
+        
         if self.api:
             self.page.run_task(self._fetch_dev_profile)
 
@@ -78,28 +88,33 @@ class SettingsView(ft.Container):
             self._dev_card_ref.current.update()
 
     def _build_view(self) -> ft.Control:
-        """Build settings layout"""
+        """Build settings layout - compact version"""
         
-        # ... (Existing Header and Theme Settings) ...
-        # Header
+        # Header - more compact
         header = ft.Column(
             controls=[
                 ft.Text(
                     "Settings",
-                    size=typography.size_2xl,
+                    size=typography.size_xl,  # Reduced from 2xl
                     weight=ft.FontWeight.W_700,
                     color=colors.text_primary,
                 ),
                 ft.Text(
                     "Customize your experience and preferences",
-                    size=typography.size_base,
+                    size=typography.size_sm,  # Reduced from base
                     color=colors.text_secondary,
                 ),
             ],
-            spacing=spacing.xs,
+            spacing=0,  # Reduced from xs
         )
         
         self._theme_settings_control = self._build_theme_settings()
+        
+        # Notification Settings Section
+        notification_section = self._build_notification_section()
+        
+        # XSOverlay Settings Section
+        xsoverlay_section = self._build_xsoverlay_section()
         
         # Update Section
         update_section = self._build_update_section()
@@ -110,13 +125,17 @@ class SettingsView(ft.Container):
         content_column = ft.Column(
             controls=[
                 header,
-                ft.Container(height=spacing.lg),
+                ft.Container(height=spacing.sm),  # Reduced from lg
                 self._theme_settings_control,
-                ft.Container(height=spacing.xl),
+                ft.Container(height=spacing.md),  # Reduced from xl
+                notification_section,  # NEW: Notification settings
+                ft.Container(height=spacing.md),
+                xsoverlay_section,
+                ft.Container(height=spacing.md),  # Reduced from xl
                 update_section,
-                ft.Container(height=spacing.xl),
+                ft.Container(height=spacing.md),  # Reduced from xl
                 credits_section,
-                ft.Container(height=spacing.lg),
+                ft.Container(height=spacing.sm),  # Reduced from lg
             ],
             spacing=0,
             scroll=ft.ScrollMode.AUTO,
@@ -156,7 +175,7 @@ class SettingsView(ft.Container):
 
         custom_color_row = ft.Row(
             controls=[
-                ft.Container(width=45, height=45, bgcolor=colors.accent_primary, border_radius=radius.md, border=ft.border.all(1, colors.glass_border)),
+                ft.Container(width=45, height=45, bgcolor=colors.accent_primary, border_radius=radius.md, border=ft.border.all(2, colors.glass_border)),
                 self._custom_color_field,
                 NeonButton(text="Apply", on_click=lambda e: self._handle_color_change(self._custom_color_field.value), variant="primary", height=45)
             ], spacing=spacing.md, vertical_alignment=ft.CrossAxisAlignment.CENTER
@@ -179,6 +198,662 @@ class SettingsView(ft.Container):
                 ],
             ),
         )
+
+    def _build_notification_section(self) -> ft.Control:
+        """Build Notification Settings Section"""
+        try:
+            notif_service = get_notification_service()
+            config = notif_service.config
+            
+            # Volume slider
+            self._volume_slider = ft.Slider(
+                value=config.master_volume,
+                min=0,
+                max=1,
+                divisions=20,
+                label="{value:.0%}",
+                active_color=colors.accent_primary,
+                inactive_color=colors.bg_glass,
+                on_change=self._handle_volume_change,
+            )
+            
+            self._volume_label = ft.Text(
+                f"{int(config.master_volume * 100)}%",
+                size=typography.size_sm,
+                color=colors.text_primary,
+                weight=ft.FontWeight.W_500,
+            )
+            
+            # Event toggles
+            def create_toggle(label: str, description: str, value: bool, on_change):
+                return ft.Row(
+                    controls=[
+                        ft.Column(
+                            controls=[
+                                ft.Text(label, weight=ft.FontWeight.W_500, color=colors.text_primary),
+                                ft.Text(description, size=typography.size_xs, color=colors.text_tertiary),
+                            ],
+                            spacing=2,
+                        ),
+                        ft.Container(expand=True),
+                        ft.Switch(
+                            value=value,
+                            active_color=colors.accent_primary,
+                            on_change=on_change,
+                            scale=0.85,
+                        ),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                )
+            
+            self._watchlist_toggle = create_toggle(
+                "Watchlist Alerts", 
+                "Play sound when watchlisted user joins",
+                config.watchlist_alerts_enabled,
+                lambda e: self._handle_notif_toggle("watchlist", e.control.value)
+            )
+            
+            self._automod_toggle = create_toggle(
+                "Auto-Mod Actions",
+                "Play sound when auto-mod accepts/rejects request",
+                config.automod_alerts_enabled,
+                lambda e: self._handle_notif_toggle("automod", e.control.value)
+            )
+            
+            self._joinreq_toggle = create_toggle(
+                "New Join Requests",
+                "Play sound when new group join requests arrive",
+                config.join_request_alerts_enabled,
+                lambda e: self._handle_notif_toggle("joinreq", e.control.value)
+            )
+            
+            self._player_join_toggle = create_toggle(
+                "Player Joins",
+                "Play sound when players join your instance (can be noisy)",
+                config.player_join_alerts_enabled,
+                lambda e: self._handle_notif_toggle("player_join", e.control.value)
+            )
+            
+            self._update_toggle = create_toggle(
+                "App Updates",
+                "Play sound when updates are available",
+                config.update_alerts_enabled,
+                lambda e: self._handle_notif_toggle("update", e.control.value)
+            )
+            
+            # Sound file picker
+            available_sounds = notif_service.get_available_sounds()
+            current_sound = config.custom_sound_path 
+            
+            # Ensure dropdown value is valid
+            dropdown_value = "Default"
+            if current_sound and str(current_sound) in available_sounds:
+                 dropdown_value = str(current_sound)
+            
+            self._sound_dropdown = ft.Dropdown(
+                value=dropdown_value,
+                options=self._get_sound_options(available_sounds),
+                on_change=self._handle_sound_change,
+                border_color=colors.glass_border,
+                focused_border_color=colors.accent_primary,
+                bgcolor=colors.bg_elevated,
+                width=250,
+                content_padding=10,
+            )
+            
+            # Test button
+            self._test_sound_button = NeonButton(
+                text="Test",
+                icon=ft.Icons.VOLUME_UP_ROUNDED,
+                on_click=self._handle_test_sound,
+                variant="secondary",
+                height=40,
+                width=100
+            )
+
+            # Import button
+            self._import_sound_button = NeonButton(
+                text="Import",
+                icon=ft.Icons.UPLOAD_FILE_ROUNDED,
+                on_click=lambda _: self._file_picker.pick_files(
+                    allow_multiple=False,
+                    allowed_extensions=["mp3", "wav", "ogg"],
+                    dialog_title="Select Notification Sound"
+                ),
+                variant="secondary",
+                height=40,
+                width=120
+            )
+            
+            return GlassPanel(
+                content=ft.Column(
+                    controls=[
+                        # Header
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE_ROUNDED, color=colors.accent_primary),
+                                ft.Text("Notification Sounds", size=typography.size_lg, weight=ft.FontWeight.W_600, color=colors.text_primary),
+                            ],
+                            spacing=spacing.sm,
+                        ),
+                        ft.Divider(color=colors.glass_border, height=spacing.md),
+                        
+                        # Volume control
+                        ft.Text("Master Volume", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                        ft.Row(
+                            controls=[
+                                ft.Icon(ft.Icons.VOLUME_DOWN_ROUNDED, color=colors.text_secondary, size=18),
+                                ft.Container(content=self._volume_slider, expand=True),
+                                ft.Icon(ft.Icons.VOLUME_UP_ROUNDED, color=colors.text_secondary, size=18),
+                                self._volume_label,
+                            ],
+                            spacing=spacing.sm,
+                        ),
+                        ft.Container(height=spacing.sm),
+                        
+                        # Event toggles
+                        ft.Text("Notification Events", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                        ft.Container(height=spacing.xs),
+                        self._watchlist_toggle,
+                        self._automod_toggle,
+                        self._joinreq_toggle,
+                        self._player_join_toggle,
+                        self._update_toggle,
+                        ft.Container(height=spacing.md),
+                        
+                        # Sound selection
+                        ft.Text("Notification Sound", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                        ft.Container(height=spacing.xs),
+                        ft.Row(
+                            controls=[
+                                self._sound_dropdown,
+                                ft.Container(width=spacing.sm),
+                                self._test_sound_button,
+                                ft.Container(width=spacing.xs),
+                                self._import_sound_button,
+                            ],
+                        ),
+                        ft.Container(height=spacing.xs),
+                        ft.Text(
+                            "💡 Place custom .mp3/.wav/.ogg files in the app folder or assets folder",
+                            size=typography.size_xs,
+                            color=colors.text_tertiary,
+                            italic=True,
+                        ),
+                    ],
+                ),
+            )
+        except Exception as e:
+            print(f"Error building notification section: {e}")
+            import traceback
+            traceback.print_exc()
+            return GlassPanel(content=ft.Text(f"Error loading notification settings: {e}", color=colors.danger))
+
+    def _get_sound_options(self, sounds):
+        """Generate dropdown options with nice labels"""
+        opts = [ft.dropdown.Option("Default", "Default Sound")]
+        for s in sounds:
+            filename = s.replace("\\", "/").split("/")[-1]
+            if filename == "Group_Guardian_Notif_sound.mp3":
+                continue # Skip main default file (covered by 'Default Sound')
+            elif filename == "Group_Guardian_Notif_Sound_No_Voice.mp3":
+                opts.append(ft.dropdown.Option(s, "Default (No Voice)"))
+            else:
+                opts.append(ft.dropdown.Option(s, filename))
+        return opts
+
+    def _handle_volume_change(self, e):
+        """Handle volume slider change"""
+        notif_service = get_notification_service()
+        volume = e.control.value
+        notif_service.set_volume(volume)
+        self._volume_label.value = f"{int(volume * 100)}%"
+        self._volume_label.update()
+
+    def _handle_notif_toggle(self, event_type: str, enabled: bool):
+        """Handle notification event toggle"""
+        notif_service = get_notification_service()
+        config = notif_service.config
+        
+        if event_type == "watchlist":
+            config.watchlist_alerts_enabled = enabled
+        elif event_type == "automod":
+            config.automod_alerts_enabled = enabled
+        elif event_type == "joinreq":
+            config.join_request_alerts_enabled = enabled
+        elif event_type == "player_join":
+            config.player_join_alerts_enabled = enabled
+        elif event_type == "update":
+            config.update_alerts_enabled = enabled
+        
+        notif_service.save_config()
+        
+        status = "enabled" if enabled else "disabled"
+        self.page.snack_bar = ft.SnackBar(
+            content=ft.Text(f"Notification {status}"),
+            bgcolor=colors.success if enabled else colors.text_tertiary
+        )
+        self.page.snack_bar.open = True
+        self.page.update()
+
+    def _handle_sound_change(self, e):
+        """Handle sound file selection change"""
+        notif_service = get_notification_service()
+        
+        if e.control.value == "Default":
+            notif_service.set_custom_sound(None)
+        else:
+            notif_service.set_custom_sound(e.control.value)
+        
+        self.page.snack_bar = ft.SnackBar(
+            content=ft.Text("Notification sound updated"),
+            bgcolor=colors.success
+        )
+        self.page.snack_bar.open = True
+        self.page.update()
+
+    def _handle_test_sound(self, e):
+        """Play test notification sound"""
+        notif_service = get_notification_service()
+        success = notif_service.play_test()
+        
+        if success:
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text("🔔 Test notification played!"),
+                bgcolor=colors.success
+            )
+        else:
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text("⚠️ Could not play sound - check if pygame is installed"),
+                bgcolor=colors.warning
+            )
+        self.page.snack_bar.open = True
+        self.page.update()
+
+    def _handle_file_picker_result(self, e: ft.FilePickerResultEvent):
+        """Handle custom sound file selection"""
+        if not e.files or not e.files[0].path:
+            return
+
+        import shutil
+        import os
+        from pathlib import Path
+
+        file_path = Path(e.files[0].path)
+        assets_dir = Path(os.getcwd()) / "assets"
+        assets_dir.mkdir(exist_ok=True)
+        
+        target_path = assets_dir / file_path.name
+        
+        try:
+            # Copy file to assets
+            shutil.copy2(file_path, target_path)
+            
+            # Update service
+            notif_service = get_notification_service()
+            notif_service.set_custom_sound(str(target_path))
+            
+            # Refresh dropdown options
+            available_sounds = notif_service.get_available_sounds()
+            
+            self._sound_dropdown.options = self._get_sound_options(available_sounds)
+            self._sound_dropdown.value = str(target_path)
+            self._sound_dropdown.update()
+            
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Imported and set: {file_path.name}"),
+                bgcolor=colors.success
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+            
+        except Exception as ex:
+            print(f"Error importing sound: {ex}")
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Failed to import sound: {ex}"),
+                bgcolor=colors.danger
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+
+    def _build_xsoverlay_section(self) -> ft.Control:
+        """Build XSOverlay Integration Settings Section"""
+        
+        alert_service = get_alert_service()
+        xso_status = alert_service.get_xsoverlay_status() if alert_service else {}
+        
+        # Status indicator
+        is_connected = xso_status.get("connected", False)
+        is_enabled = xso_status.get("enabled", True)
+        
+        status_color = colors.success if is_connected else colors.text_tertiary
+        status_text = "Connected" if is_connected else "Not Connected"
+        
+        self._xso_status_indicator = ft.Row(
+            controls=[
+                ft.Container(
+                    width=10, height=10, 
+                    border_radius=radius.full, 
+                    bgcolor=status_color,
+                    animate=ft.Animation(300, ft.AnimationCurve.EASE_OUT),
+                ),
+                ft.Text(status_text, size=typography.size_sm, color=status_color),
+            ],
+            spacing=spacing.sm,
+        )
+        
+        # Enable XSOverlay switch
+        self._xso_enable_switch = ft.Switch(
+            value=is_enabled,
+            active_color=colors.accent_primary,
+            on_change=self._handle_xso_toggle,
+        )
+        
+        # VRC Fallback switch
+        vrc_fallback = xso_status.get("vrc_fallback", True)
+        self._xso_fallback_switch = ft.Switch(
+            value=vrc_fallback,
+            active_color=colors.accent_secondary,
+            on_change=self._handle_xso_fallback_toggle,
+        )
+        
+        # Connect button
+        self._xso_connect_button = NeonButton(
+            text="Connect" if not is_connected else "Reconnect",
+            icon=ft.Icons.LINK_ROUNDED if not is_connected else ft.Icons.REFRESH_ROUNDED,
+            on_click=self._handle_xso_connect,
+            variant="primary",
+            height=40,
+        )
+        
+        # Test button
+        self._xso_test_button = NeonButton(
+            text="Send Test",
+            icon=ft.Icons.NOTIFICATIONS_ACTIVE_ROUNDED,
+            on_click=self._handle_xso_test,
+            variant="secondary",
+            height=40,
+        )
+        
+        return GlassPanel(
+            content=ft.Column(
+                controls=[
+                    # Header
+                    ft.Row(
+                        controls=[
+                            ft.Icon(ft.Icons.HEADSET_ROUNDED, color=colors.accent_secondary),
+                            ft.Text("XSOverlay Integration", size=typography.size_lg, weight=ft.FontWeight.W_600, color=colors.text_primary),
+                            ft.Container(expand=True),
+                            self._xso_status_indicator,
+                        ],
+                        spacing=spacing.sm,
+                    ),
+                    ft.Divider(color=colors.glass_border, height=spacing.md),
+                    
+                    # Description
+                    ft.Text(
+                        "Receive watchlist alerts directly in VR through XSOverlay notifications.",
+                        size=typography.size_sm,
+                        color=colors.text_secondary,
+                    ),
+                    ft.Container(height=spacing.sm),
+                    
+                    # Enable toggle
+                    ft.Row(
+                        controls=[
+                            ft.Column(
+                                controls=[
+                                    ft.Text("Enable XSOverlay Alerts", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                                    ft.Text("Send notifications to XSOverlay when available", size=typography.size_xs, color=colors.text_tertiary),
+                                ],
+                                spacing=2,
+                            ),
+                            ft.Container(expand=True),
+                            self._xso_enable_switch,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Container(height=spacing.sm),
+                    
+                    # VRC Fallback toggle
+                    ft.Row(
+                        controls=[
+                            ft.Column(
+                                controls=[
+                                    ft.Text("VRChat Invite Fallback", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                                    ft.Text("Fall back to in-game invites if XSOverlay unavailable", size=typography.size_xs, color=colors.text_tertiary),
+                                ],
+                                spacing=2,
+                            ),
+                            ft.Container(expand=True),
+                            self._xso_fallback_switch,
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Container(height=spacing.sm),
+                    
+                    # Performance throttling toggle
+                    ft.Row(
+                        controls=[
+                            ft.Column(
+                                controls=[
+                                    ft.Text("Performance Throttling", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                                    ft.Text("Reduce notification frequency when GPU is stressed", size=typography.size_xs, color=colors.text_tertiary),
+                                ],
+                                spacing=2,
+                            ),
+                            ft.Container(expand=True),
+                            ft.Switch(
+                                value=True,  # Enabled by default
+                                active_color=colors.accent_secondary,
+                                on_change=self._handle_xso_throttle_toggle,
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Container(height=spacing.sm),
+                    
+                    # Theme sync toggle
+                    ft.Row(
+                        controls=[
+                            ft.Column(
+                                controls=[
+                                    ft.Text("Theme Sync", weight=ft.FontWeight.W_500, color=colors.text_primary),
+                                    ft.Text("Match app accent color to XSOverlay theme", size=typography.size_xs, color=colors.text_tertiary),
+                                ],
+                                spacing=2,
+                            ),
+                            ft.Container(expand=True),
+                            ft.Switch(
+                                value=True,  # Enabled by default
+                                active_color=colors.accent_primary,
+                                on_change=self._handle_xso_theme_sync_toggle,
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Container(height=spacing.md),
+                    
+                    # Buttons row
+                    ft.Row(
+                        controls=[
+                            self._xso_connect_button,
+                            self._xso_test_button,
+                        ],
+                        spacing=spacing.md,
+                    ),
+                    
+                    # Info text
+                    ft.Container(height=spacing.sm),
+                    ft.Text(
+                        "💡 Make sure XSOverlay is running before connecting. Port: 42070",
+                        size=typography.size_xs,
+                        color=colors.text_tertiary,
+                        italic=True,
+                    ),
+                ],
+            ),
+        )
+    
+    async def _handle_xso_toggle(self, e):
+        """Toggle XSOverlay enabled state"""
+        alert_service = get_alert_service()
+        if alert_service:
+            alert_service.xsoverlay_enabled = e.control.value
+            status = "enabled" if e.control.value else "disabled"
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"XSOverlay alerts {status}"),
+                bgcolor=colors.success if e.control.value else colors.text_tertiary
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+    
+    async def _handle_xso_fallback_toggle(self, e):
+        """Toggle VRC invite fallback"""
+        alert_service = get_alert_service()
+        if alert_service:
+            alert_service.vrc_invite_fallback = e.control.value
+            status = "enabled" if e.control.value else "disabled"
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"VRChat invite fallback {status}"),
+                bgcolor=colors.bg_elevated
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+    
+    async def _handle_xso_connect(self, e):
+        """Connect to XSOverlay"""
+        self._xso_connect_button.set_loading(True)
+        self._xso_connect_button.update()
+        
+        error_msg = None
+        try:
+            alert_service = get_alert_service()
+            if not alert_service:
+                error_msg = "Alert service not initialized"
+            else:
+                connected = await alert_service.connect_xsoverlay()
+                
+                if connected:
+                    # Update status
+                    self._xso_status_indicator.controls[0].bgcolor = colors.success
+                    self._xso_status_indicator.controls[1].value = "Connected"
+                    self._xso_status_indicator.controls[1].color = colors.success
+                    self._xso_connect_button.text = "Reconnect"
+                    self._xso_connect_button.icon = ft.Icons.REFRESH_ROUNDED
+                    
+                    self.page.snack_bar = ft.SnackBar(
+                        content=ft.Text("✅ Connected to XSOverlay!"),
+                        bgcolor=colors.success
+                    )
+                else:
+                    error_msg = "Connection refused - Make sure XSOverlay is running (port 42070)"
+        except ConnectionRefusedError:
+            error_msg = "Connection refused - XSOverlay is not running"
+        except TimeoutError:
+            error_msg = "Connection timed out - XSOverlay may be busy or not responding"
+        except Exception as ex:
+            error_msg = f"Connection error: {str(ex)}"
+        
+        if error_msg:
+            self._xso_status_indicator.controls[0].bgcolor = colors.danger
+            self._xso_status_indicator.controls[1].value = "Failed"
+            self._xso_status_indicator.controls[1].color = colors.danger
+            
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"❌ {error_msg}"),
+                bgcolor=colors.danger,
+                duration=5000  # Show longer for errors
+            )
+        
+        self._xso_status_indicator.update()
+        self.page.snack_bar.open = True
+        self.page.update()
+        
+        self._xso_connect_button.set_loading(False)
+        self._xso_connect_button.update()
+    
+    async def _handle_xso_test(self, e):
+        """Send test notification to XSOverlay"""
+        self._xso_test_button.set_loading(True)
+        self._xso_test_button.update()
+        
+        error_msg = None
+        try:
+            alert_service = get_alert_service()
+            if not alert_service:
+                error_msg = "Alert service not initialized"
+            else:
+                # Check if connected first
+                status = alert_service.get_xsoverlay_status()
+                if not status.get("connected", False):
+                    error_msg = "Not connected to XSOverlay - Click 'Connect' first"
+                else:
+                    success = await alert_service.test_xsoverlay()
+                    
+                    if success:
+                        self.page.snack_bar = ft.SnackBar(
+                            content=ft.Text("✅ Test notification sent! Check your VR headset"),
+                            bgcolor=colors.success
+                        )
+                    else:
+                        error_msg = "Failed to send notification - WebSocket may have disconnected"
+        except Exception as ex:
+            error_msg = f"Test failed: {str(ex)}"
+        
+        if error_msg:
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"❌ {error_msg}"),
+                bgcolor=colors.danger,
+                duration=5000
+            )
+        
+        self.page.snack_bar.open = True
+        self.page.update()
+        
+        self._xso_test_button.set_loading(False)
+        self._xso_test_button.update()
+    
+    async def _handle_xso_throttle_toggle(self, e):
+        """Toggle performance throttling"""
+        from services.xsoverlay import get_xsoverlay_service
+        xso = get_xsoverlay_service()
+        if xso:
+            xso.config.performance_throttle_enabled = e.control.value
+            status = "enabled" if e.control.value else "disabled"
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Performance throttling {status}"),
+                bgcolor=colors.bg_elevated
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+    
+    async def _handle_xso_theme_sync_toggle(self, e):
+        """Toggle theme synchronization with XSOverlay"""
+        from services.xsoverlay import get_xsoverlay_service
+        xso = get_xsoverlay_service()
+        if xso:
+            xso.config.theme_sync_enabled = e.control.value
+            
+            if e.control.value:
+                # Register theme change callback
+                def on_theme_change(color: str):
+                    if self.on_theme_change:
+                        self.on_theme_change(color)
+                xso.on_theme_change(on_theme_change)
+                
+                # Apply current XSOverlay color if available
+                if xso.accent_color:
+                    if self.on_theme_change:
+                        self.on_theme_change(xso.accent_color)
+                        
+            status = "enabled" if e.control.value else "disabled"
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(f"Theme sync {status}"),
+                bgcolor=colors.bg_elevated
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
 
     def _build_update_section(self) -> ft.Control:
         """Build Update Checker Section"""
@@ -334,7 +1009,7 @@ class SettingsView(ft.Container):
             padding=ft.padding.symmetric(horizontal=10, vertical=5),
             bgcolor=colors.bg_elevated,
             border_radius=radius.md,
-            border=ft.border.all(1, colors.accent_secondary),
+            border=ft.border.all(2, colors.accent_secondary),
         )
         
         # Use Stack for PFP overlapping Banner
@@ -426,7 +1101,11 @@ class SettingsView(ft.Container):
             self.page.theme = ft.Theme(color_scheme_seed=color)
             self.page.update()
         
-        # Rebuild
+        # Notify main app to refresh sidebar and other theme-aware components
+        if self.on_theme_change:
+            self.on_theme_change(color)
+        
+        # Rebuild settings panel
         if self._theme_settings_control:
              new_content = self._build_theme_settings()
              self.content.controls[2] = new_content

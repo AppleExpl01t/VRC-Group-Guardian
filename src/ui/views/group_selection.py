@@ -8,20 +8,25 @@ from ..components.animated_background import SimpleGradientBackground
 
 
 class GroupCard(ft.Container):
-    def __init__(self, group: dict, on_select=None, is_active_group: bool = False, **kwargs):
+    def __init__(self, group: dict, on_select=None, is_active_group: bool = False, expand_card: bool = False, **kwargs):
         self._group = group
         self._on_select = on_select
         self._is_active_group = is_active_group
+        self._expand_card = expand_card
+        
+        # Default width for desktop, or expand for mobile
+        card_width = None if expand_card else 280
+        
         super().__init__(
             content=self._build(),
-            width=280,
+            width=card_width,
+            expand=expand_card,
             border_radius=radius.lg,
             bgcolor=colors.bg_elevated,
-            border=ft.border.all(1, colors.glass_border),
+            border=ft.border.all(2, colors.glass_border),
             shadow=shadows.card_shadow(),
-            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+            clip_behavior=ft.ClipBehavior.NONE,  # Allow glow effects to render outside bounds
             animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-            animate_scale=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
             on_click=lambda e: on_select(group) if on_select else None,
             on_hover=self._hover,
             **kwargs,
@@ -48,8 +53,7 @@ class GroupCard(ft.Container):
         banner_url = g.get("bannerUrl")
         if banner_url:
             # Direct image allows transparency to show the card background (bg_elevated)
-            # This ensures "filled in color matches the background" as requested
-            banner_content = ft.Image(
+            banner_image = ft.Image(
                 src=banner_url,
                 fit=ft.ImageFit.COVER,
                 width=280,
@@ -57,14 +61,24 @@ class GroupCard(ft.Container):
             )
         else:
             # No banner - use gradient on dark background
-            banner_content = ft.Container(
+            banner_image = ft.Container(
                 height=80,
+                width=280,
                 gradient=ft.LinearGradient(
                     begin=ft.alignment.top_left,
                     end=ft.alignment.bottom_right,
                     colors=["rgba(139,92,246,0.5)", "rgba(6,182,212,0.4)"],
                 ),
             )
+        
+        # Wrap banner in container with rounded TOP corners to match card
+        banner_content = ft.Container(
+            content=banner_image,
+            width=280,
+            height=80,
+            border_radius=ft.border_radius.only(top_left=radius.lg, top_right=radius.lg),
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
         
         # Notification Badge
         pending_count = g.get("pendingRequestCount", 0)
@@ -150,12 +164,14 @@ class GroupCard(ft.Container):
     def _hover(self, e):
         if e.data == "true":
             self.border = ft.border.all(2, colors.accent_primary)
-            self.shadow = ft.BoxShadow(blur_radius=30, color="rgba(139,92,246,0.4)")
-            self.scale = 1.02
+            # Enhanced glow effect on hover - no zoom, just beautiful glow
+            self.shadow = [
+                ft.BoxShadow(blur_radius=35, color="rgba(139,92,246,0.5)", blur_style=ft.ShadowBlurStyle.OUTER),
+                ft.BoxShadow(blur_radius=15, spread_radius=2, color="rgba(139,92,246,0.2)"),
+            ]
         else:
-            self.border = ft.border.all(1, colors.glass_border)
+            self.border = ft.border.all(2, colors.glass_border)
             self.shadow = shadows.card_shadow()
-            self.scale = 1.0
         self.update()
 
 
@@ -184,7 +200,7 @@ class GroupSelectionView(ft.View):
         "offline": "Offline",
     }
     
-    def __init__(self, groups=None, on_group_select=None, on_logout=None, on_refresh=None, on_settings=None, username="User", pfp_path=None, user_data=None, current_group_id=None, supports_live=True, **kwargs):
+    def __init__(self, groups=None, on_group_select=None, on_logout=None, on_refresh=None, on_settings=None, username="User", pfp_path=None, user_data=None, current_group_id=None, supports_live=True, has_live_data=False, **kwargs):
         self._groups = groups or []
         self._on_group_select = on_group_select
         self._on_logout = on_logout
@@ -195,9 +211,12 @@ class GroupSelectionView(ft.View):
         self._user_data = user_data or {}
         self._current_group_id = current_group_id
         self._supports_live = supports_live
+        self._has_live_data = has_live_data  # Whether we have active log data
+        self._is_mobile = kwargs.pop("is_mobile", False)
         self._loading = None
         self._grid = None
         self._no_groups = None
+        self._live_monitor_btn = None  # Reference to live monitor button
         
         # SAME as LoginView - use bg_deepest as bgcolor
         super().__init__(
@@ -212,6 +231,10 @@ class GroupSelectionView(ft.View):
     
     def _build_view(self):
         """Build the view wrapped in AnimatedBackground like LoginView"""
+        from ..utils.responsive import is_mobile_platform
+        
+        # Use passed flag
+        is_mobile = self._is_mobile
         
         # Loading indicator
         self._loading = ft.Container(
@@ -226,7 +249,6 @@ class GroupSelectionView(ft.View):
         )
         
         # Groups grid
-        # Groups grid
         cards = []
         if self._groups:
             cards = [
@@ -234,6 +256,7 @@ class GroupSelectionView(ft.View):
                     g, 
                     on_select=self._on_group_select,
                     is_active_group=(g.get('id') == self._current_group_id),
+                    expand_card=is_mobile, # Expand cards on mobile
                     key=f"group_card_{g.get('id')}"
                 ) for g in self._groups
             ]
@@ -258,234 +281,171 @@ class GroupSelectionView(ft.View):
             visible=False,
         )
         
-        # Header
-        header = ft.Container(
-            content=ft.Row([
-                ft.Column([
-                    ft.Text("Select a Group", size=typography.size_2xl, weight=ft.FontWeight.W_700, color=colors.text_primary),
-                    ft.Text("Choose a group to moderate", size=typography.size_base, color=colors.text_secondary),
-                ], spacing=2),
-                ft.Container(expand=True),
-                ft.ElevatedButton(
-                    "Live Monitor",
-                    icon=ft.Icons.PLAY_CIRCLE_FILLED_ROUNDED,
-                    style=ft.ButtonStyle(
-                        color=colors.bg_base,
-                        bgcolor=colors.success,
-                    ),
-                    on_click=lambda e: self.page.go("/live"),
-                    key="live_monitor_btn"
-                ) if self._supports_live else ft.Container(),
-                ft.IconButton(
-                    icon=ft.Icons.REFRESH_ROUNDED,
-                    tooltip="Refresh Groups",
-                    icon_color=colors.text_secondary,
-                    on_click=self._on_refresh,
-                    disabled=self._on_refresh is None,
-                    key="refresh_groups_btn"
-                ),
-            ], spacing=spacing.md),
-            padding=ft.padding.all(spacing.xl),
-        )
-
-        # User Profile Panel (Bottom Left) - EXACTLY matches Sidebar component
-        # Get VRChat status
-        user_status = self._user_data.get("status", "offline")
-        status_color = self.STATUS_COLORS.get(user_status.lower() if user_status else "offline", self.STATUS_COLORS["offline"])
-        status_label = self.STATUS_LABELS.get(user_status.lower() if user_status else "offline", "Offline")
-        
-        # Logo section - use actual app icon (same as Sidebar)
-        import os
-        icon_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.jpg"))
-        
-        if os.path.exists(icon_path):
-            logo_widget = ft.Container(
-                content=ft.Image(
-                    src=icon_path,
-                    fit=ft.ImageFit.COVER,
-                    width=36,
-                    height=36,
-                ),
-                width=40,
-                height=40,
-                border_radius=radius.md,
-                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            )
-        else:
-            logo_widget = ft.Container(
-                content=ft.Icon(
-                    ft.Icons.SHIELD_ROUNDED,
-                    size=28,
-                    color=colors.accent_primary,
-                ),
-                width=40,
-                height=40,
-                border_radius=radius.md,
-                bgcolor=f"rgba(139, 92, 246, 0.15)",
-                alignment=ft.alignment.center,
-            )
-        
-        logo_section = ft.Container(
-            content=ft.Row(
-                controls=[
-                    logo_widget,
-                    ft.Text(
-                        "Group Guardian",
-                        size=typography.size_lg,
-                        weight=ft.FontWeight.W_600,
-                        color=colors.text_primary,
-                    ),
-                ],
-                spacing=spacing.md,
+        # Create Live Monitor button
+        self._live_monitor_btn = ft.ElevatedButton(
+            "Live Monitor",
+            icon=ft.Icons.PLAY_CIRCLE_FILLED_ROUNDED,
+            style=ft.ButtonStyle(
+                color=colors.bg_base,
+                bgcolor=colors.success,
             ),
-            padding=ft.padding.only(bottom=spacing.lg),
+            on_click=lambda e: self.page.go("/live"),
+            key="live_monitor_btn",
+            visible=self._supports_live and self._has_live_data,
         )
         
-        # Avatar widget (same as Sidebar)
-        if self._pfp_path:
-            avatar_widget = ft.Container(
-                content=ft.Image(
-                    src=self._pfp_path,
-                    fit=ft.ImageFit.COVER,
-                    width=36,
-                    height=36,
-                    border_radius=18,
-                ),
-                width=36,
-                height=36,
-                border_radius=18,
-                clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
-            )
-        else:
-            avatar_widget = ft.Container(
-                content=ft.Text(
-                    self._username[0].upper() if self._username else "?",
-                    size=14,
-                    weight=ft.FontWeight.W_600,
-                    color=colors.text_primary,
-                ),
-                width=36,
-                height=36,
-                border_radius=18,
-                bgcolor=colors.accent_primary,
-                alignment=ft.alignment.center,
-            )
-        
-        # Settings nav item (same as Sidebar NavItem)
-        settings_btn = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.SETTINGS_ROUNDED, size=20, color=colors.text_secondary),
-                    ft.Text("Settings", size=typography.size_base, weight=ft.FontWeight.W_400, color=colors.text_secondary),
-                ],
-                spacing=spacing.md,
-            ),
-            padding=ft.padding.symmetric(horizontal=spacing.md, vertical=spacing.sm),
-            border_radius=radius.md,
-            on_click=self._on_settings,
-            on_hover=lambda e: self._hover_settings(e),
-            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        )
-        
-        # Logout button
+        # Logout button logic
         logout_button = ft.IconButton(
             icon=ft.Icons.LOGOUT_ROUNDED,
-            icon_size=18,
+            icon_size=20 if is_mobile else 18,
             icon_color=colors.text_tertiary,
             tooltip="Logout",
             key="logout_btn",
             on_click=lambda e: self._on_logout() if self._on_logout else None,
-            style=ft.ButtonStyle(
-                bgcolor={
-                    ft.ControlState.HOVERED: colors.danger_bg,
-                },
-                color={
-                    ft.ControlState.HOVERED: colors.danger,
-                },
-            ),
         )
         
-        # User section (same as Sidebar)
-        user_section = ft.Container(
-            content=ft.Row(
-                controls=[
+        # Avatar logic
+        avatar_url = (
+            self._pfp_path or
+            self._user_data.get("local_pfp") or 
+            self._user_data.get("profilePicOverride") or 
+            self._user_data.get("userIcon") or 
+            self._user_data.get("currentAvatarThumbnailImageUrl") or
+            self._user_data.get("currentAvatarImageUrl") or
+            self._user_data.get("imageUrl") or
+            self._user_data.get("thumbnailUrl")
+        )
+        
+        avatar_content = ft.Image(src=avatar_url, fit=ft.ImageFit.COVER) if avatar_url else ft.Text(self._username[0].upper() if self._username else "?", size=14, weight=ft.FontWeight.W_600, color=colors.text_primary)
+        avatar_widget = ft.Container(
+            content=avatar_content,
+            width=36, height=36, border_radius=18,
+            bgcolor=None if avatar_url else colors.accent_primary,
+            alignment=ft.alignment.center,
+            clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        )
+
+        if is_mobile:
+            # === MOBILE LAYOUT ===
+            # Header with Avatar, Title, Settings, Logout
+            mobile_header = ft.Container(
+                content=ft.Row([
                     avatar_widget,
-                    ft.Column(
-                        controls=[
-                            ft.Text(
-                                self._username,
-                                size=typography.size_sm,
-                                weight=ft.FontWeight.W_500,
-                                color=colors.text_primary,
-                            ),
-                            ft.Row(
-                                controls=[
-                                    ft.Container(
-                                        width=8,
-                                        height=8,
-                                        border_radius=4,
-                                        bgcolor=status_color,
-                                    ),
-                                    ft.Text(
-                                        status_label,
-                                        size=typography.size_xs,
-                                        color=colors.text_tertiary,
-                                    ),
-                                ],
-                                spacing=4,
-                            ),
-                        ],
-                        spacing=0,
-                        expand=True,
-                    ),
+                    ft.Column([
+                        ft.Text("Select Group", size=typography.size_lg, weight=ft.FontWeight.W_700, color=colors.text_primary),
+                        ft.Text(self._username, size=typography.size_xs, color=colors.text_secondary),
+                    ], spacing=0, expand=True),
+                    self._live_monitor_btn,
+                    ft.IconButton(ft.Icons.SETTINGS_ROUNDED, icon_color=colors.text_secondary, on_click=self._on_settings),
                     logout_button,
-                ],
-                spacing=spacing.sm,
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            padding=ft.padding.only(top=spacing.md),
-            border=ft.border.only(top=ft.BorderSide(1, colors.glass_border)),
-        )
-        
-        # Full sidebar panel (EXACT same structure as Sidebar component)
-        user_panel = ft.Container(
-            content=ft.Column(
-                controls=[
-                    logo_section,
-                    ft.Container(expand=True),  # Spacer to push settings/user to bottom
+                ], spacing=spacing.sm),
+                padding=ft.padding.symmetric(horizontal=spacing.md, vertical=spacing.sm),
+                bgcolor=colors.bg_base,
+                border=ft.border.only(bottom=ft.BorderSide(1, colors.glass_border)),
+            )
+            
+            content = ft.Column([
+                mobile_header,
+                ft.Container(
+                    content=ft.Stack([self._loading, self._grid, self._no_groups]),
+                    expand=True,
+                    padding=ft.padding.all(spacing.md),
+                ),
+            ], spacing=0, expand=True)
+            
+        else:
+            # === DESKTOP LAYOUT ===
+            # Original Sidebar Panel + Main Content
+            
+            # Header (Desktop)
+            header = ft.Container(
+                content=ft.Row([
+                    ft.Column([
+                        ft.Text("Select a Group", size=typography.size_2xl, weight=ft.FontWeight.W_700, color=colors.text_primary),
+                        ft.Text("Choose a group to moderate", size=typography.size_base, color=colors.text_secondary),
+                    ], spacing=2),
+                    ft.Container(expand=True),
+                    self._live_monitor_btn,
+                    ft.IconButton(
+                        icon=ft.Icons.REFRESH_ROUNDED,
+                        tooltip="Refresh Groups",
+                        icon_color=colors.text_secondary,
+                        on_click=self._on_refresh,
+                        disabled=self._on_refresh is None,
+                        key="refresh_groups_btn"
+                    ),
+                ], spacing=spacing.md),
+                padding=ft.padding.all(spacing.xl),
+            )
+
+            # Sidebar Panel Construction (Reusing existing logic roughly)
+            # VRChat status colors
+            user_status = self._user_data.get("status", "offline")
+            status_color = self.STATUS_COLORS.get(user_status.lower() if user_status else "offline", self.STATUS_COLORS["offline"])
+            status_label = self.STATUS_LABELS.get(user_status.lower() if user_status else "offline", "Offline")
+            
+            # Logo
+            import os
+            icon_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "icon.jpg"))
+            logo_img = ft.Image(src=icon_path, width=36, height=36, fit=ft.ImageFit.COVER) if os.path.exists(icon_path) else ft.Icon(ft.Icons.SHIELD_ROUNDED, size=28, color=colors.accent_primary)
+            logo_widget = ft.Container(content=logo_img, width=40, height=40, border_radius=radius.md, clip_behavior=ft.ClipBehavior.ANTI_ALIAS, alignment=ft.alignment.center)
+            
+            # User Section
+            user_section = ft.Container(
+                content=ft.Row([
+                    avatar_widget,
+                    ft.Column([
+                        ft.Text(self._username, size=typography.size_sm, weight=ft.FontWeight.W_500, color=colors.text_primary),
+                        ft.Row([
+                            ft.Container(width=8, height=8, border_radius=4, bgcolor=status_color),
+                            ft.Text(status_label, size=typography.size_xs, color=colors.text_tertiary),
+                        ], spacing=4),
+                    ], spacing=0, expand=True),
+                    logout_button,
+                ], spacing=spacing.sm, alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                padding=ft.padding.only(top=spacing.md),
+                border=ft.border.only(top=ft.BorderSide(2, colors.glass_border)),
+            )
+
+            settings_btn = ft.Container(
+                content=ft.Row([ft.Icon(ft.Icons.SETTINGS_ROUNDED, size=20, color=colors.text_secondary), ft.Text("Settings", size=typography.size_base, color=colors.text_secondary)], spacing=spacing.md),
+                padding=ft.padding.symmetric(horizontal=spacing.md, vertical=spacing.sm),
+                border_radius=radius.md,
+                on_click=self._on_settings,
+                on_hover=lambda e: self._hover_settings(e),
+            )
+
+            user_panel = ft.Container(
+                content=ft.Column([
+                    ft.Container(content=ft.Row([logo_widget, ft.Text("Group Guardian", size=typography.size_lg, weight=ft.FontWeight.W_600, color=colors.text_primary)], spacing=spacing.md), padding=ft.padding.only(bottom=spacing.lg)),
+                    ft.Container(expand=True),
                     settings_btn,
                     user_section,
-                ],
-                spacing=0,
-                expand=True,
-            ),
-            width=240,  # Same as Sidebar width
-            bgcolor=colors.bg_base,
-            border=ft.border.only(right=ft.BorderSide(1, colors.glass_border)),
-            padding=spacing.md,
-        )
-        
-        # Main content
-        content = ft.Row([
-            # Left sidebar-style panel
-            user_panel,
-            # Main content area
-            ft.Container(
-                content=ft.Stack([
-                    ft.Column([
-                        header,
-                        ft.Container(
-                            content=ft.Stack([self._loading, self._grid, self._no_groups]),
-                            expand=True,
-                            padding=ft.padding.symmetric(horizontal=spacing.xl),
-                        ),
-                    ], expand=True),
-                ]),
-                expand=True,
-            ),
-        ], spacing=0, expand=True)
-        
-        # Wrap in SimpleGradientBackground - MATCHES Dashboard style
+                ], spacing=0, expand=True),
+                width=200,  # Reduced from 240 to match main Sidebar
+                bgcolor=colors.bg_base,
+                border=ft.border.only(right=ft.BorderSide(2, colors.glass_border)),
+                padding=spacing.md,
+            )
+            
+            content = ft.Row([
+                user_panel,
+                ft.Container(
+                    content=ft.Stack([
+                        ft.Column([
+                            header,
+                            ft.Container(
+                                content=ft.Stack([self._loading, self._grid, self._no_groups]),
+                                expand=True,
+                                padding=ft.padding.symmetric(horizontal=spacing.xl),
+                            ),
+                        ], expand=True),
+                    ]),
+                    expand=True,
+                ),
+            ], spacing=0, expand=True)
+            
+        # Wrap in background
         return SimpleGradientBackground(
             content=ft.Container(
                 content=content,
@@ -545,6 +505,20 @@ class GroupSelectionView(ft.View):
             self._current_group_id = group_id
             # Refresh cards
             self.set_groups(self._groups)
+    
+    def set_has_live_data(self, has_live_data: bool):
+        """
+        Update live data availability.
+        Shows/hides the Live Monitor button based on whether we have active log data.
+        """
+        self._has_live_data = has_live_data
+        if self._live_monitor_btn:
+            self._live_monitor_btn.visible = self._supports_live and has_live_data
+            if self.page:
+                try:
+                    self._live_monitor_btn.update()
+                except:
+                    pass
 
     def _hover_settings(self, e):
         """Handle hover on settings button"""

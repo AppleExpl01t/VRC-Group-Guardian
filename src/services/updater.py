@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class UpdateService:
     GITHUB_REPO = "AppleExpl01t/VRC-Group-Guardian"
-    CURRENT_VERSION = "1.0.11"  # Bumped automatically by AI during build
+    CURRENT_VERSION = "1.0.13"  # XSOverlay UDP support (Port 42069)
     
     @staticmethod
     async def check_for_updates():

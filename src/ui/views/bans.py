@@ -3,9 +3,11 @@ from ..theme import colors, radius, spacing, typography
 from ..components.neon_button import NeonButton, IconButton
 from ..components.user_card import UserCard
 from ..dialogs.user_details import show_user_details_dialog
+from ..dialogs.confirm_dialog import show_confirm_dialog
+from ..mixins import SearchableListMixin
 from services.database import get_database
 
-class BansView(ft.Container):
+class BansView(ft.Container, SearchableListMixin):
     """
     View for managing banned users in a group using Unified UserCard.
     """
@@ -15,14 +17,12 @@ class BansView(ft.Container):
         self.on_navigate = on_navigate
         self.db = get_database()
         
-        # State
-        self._bans = []
-        self._all_bans = []
         self._loading = False
-        self._search_query = ""
+        
+        # Initialize mixin
+        self._setup_search_mixin()
         
         # UI Elements
-        self._search_field = None
         self._bans_list = None
         self._count_text = None
         
@@ -44,35 +44,22 @@ class BansView(ft.Container):
             return
             
         self._loading = True
-        self._all_bans = []
-        self._update_ui()
+        self._set_items([])
+        self._render_list()
         
         group_id = self.group.get("id")
         
         try:
             bans = await self.api.get_cached_group_bans(group_id)
             if bans:
-                self._all_bans = bans
+                self._set_items(bans)
         except Exception as e:
             print(f"Error loading bans: {e}")
             
         self._loading = False
-        self._apply_filter()
+        self._render_list()
         
-    def _apply_filter(self):
-        """Apply search filter to cached bans"""
-        if self._search_query:
-            query = self._search_query.lower()
-            self._bans = [
-                b for b in self._all_bans 
-                if query in (b.get("user", {}).get("displayName") or "").lower() or
-                   query in (b.get("userId") or "").lower()
-            ]
-        else:
-            self._bans = self._all_bans.copy()
-        self._update_ui()
-        
-    def _update_ui(self):
+    def _render_list(self):
         if self._bans_list:
             self._bans_list.controls = self._build_ban_items()
             if self._loading:
@@ -85,8 +72,9 @@ class BansView(ft.Container):
             
         # Update count
         if self._count_text:
-            total = len(self._all_bans)
-            showing = len(self._bans)
+            stats = self._get_search_stats()
+            total = stats['total']
+            showing = stats['filtered']
             if self._search_query:
                 self._count_text.value = f"Showing {showing} of {total} banned users"
             else:
@@ -94,22 +82,24 @@ class BansView(ft.Container):
             self._count_text.update()
 
     def _build_view(self):
-        self._count_text = ft.Text("Loading...", color=colors.text_secondary, size=typography.size_sm)
+        self._count_text = ft.Text("Loading...", color=colors.text_secondary, size=typography.size_xs) # Reduced from sm
         
+        # Header - more compact
         header = ft.Row(
             controls=[
                 ft.Column(
                     controls=[
-                        ft.Text("Banned Users", size=typography.size_2xl, weight=ft.FontWeight.W_700, color=colors.text_primary),
-                        ft.Text(f"Manage banned users of {self.group.get('name')}", color=colors.text_secondary),
+                        ft.Text("Banned Users", size=typography.size_xl, weight=ft.FontWeight.W_700, color=colors.text_primary),  # Reduced from 2xl
+                        ft.Text(f"Manage banned users of {self.group.get('name')}", color=colors.text_secondary, size=typography.size_sm), # Reduced from default
                     ],
-                    spacing=spacing.xs,
+                    spacing=0,  # Reduced from xs
                 ),
                 ft.Container(expand=True),
                 NeonButton(
                     "Ban by Search",
                     icon=ft.Icons.PERSON_SEARCH_ROUNDED,
                     variant=NeonButton.VARIANT_DANGER,
+                    height=36,  # Smaller button
                     on_click=lambda e: self._show_user_search_dialog(),
                 ),
                 ft.Container(width=spacing.sm),
@@ -117,21 +107,15 @@ class BansView(ft.Container):
             ],
         )
         
-        self._search_field = ft.TextField(
-            hint_text="Filter banned users...",
-            prefix_icon=ft.Icons.SEARCH,
-            bgcolor=colors.bg_elevated,
-            border_radius=radius.md,
-            border_color=colors.glass_border,
-            color=colors.text_primary,
-            on_submit=self._handle_search,
-            on_change=self._handle_search,
+        search_field = self._create_search_field(
+            placeholder="Filter banned users...",
             expand=True,
+            key="bans_search"
         )
         
         search_row = ft.Row(
             controls=[
-                self._search_field,
+                search_field,
                 IconButton(
                     icon=ft.Icons.REFRESH_ROUNDED, 
                     tooltip="Refresh",
@@ -140,25 +124,30 @@ class BansView(ft.Container):
             ]
         )
         
-        self._bans_list = ft.ListView(expand=True, spacing=spacing.xs)
+        # Bans list - tighter grid
+        self._bans_list = ft.GridView(
+            max_extent=220,  # Reduced from 240
+            child_aspect_ratio=1.05,  # Slightly taller ratio
+            spacing=spacing.sm,  # Reduced from md
+            run_spacing=spacing.sm,  # Reduced from md
+            expand=True,
+        )
         
         return ft.Column(
             controls=[
                 header,
-                ft.Container(height=spacing.md),
+                ft.Container(height=spacing.sm),  # Reduced from md
                 search_row,
-                ft.Container(height=spacing.sm),
+                ft.Container(height=spacing.sm),  # Reduced from sm
                 ft.Container(content=self._bans_list, expand=True)
             ],
             expand=True,
         )
         
-    def _handle_search(self, e):
-        self._search_query = self._search_field.value or ""
-        self._apply_filter()
+
 
     def _build_ban_items(self):
-        if not self._bans and not self._loading:
+        if not self._filtered_items and not self._loading:
             return [
                 ft.Container(
                     content=ft.Column(
@@ -175,14 +164,15 @@ class BansView(ft.Container):
             ]
             
         items = []
-        for ban in self._bans:
+        for ban in self._filtered_items:
             user = ban.get("user", {})
             reason = ban.get("reason", "No reason provided")
             
             def unban(e):
                 self._show_unban_confirm(ban)
-                
-            actions = [NeonButton("Unban", variant="success", height=30, on_click=unban)]
+            
+            user_id = user.get("id", "unknown")
+            actions = [NeonButton("Unban", variant="success", height=30, on_click=unban, key=f"btn_unban_{user_id}")]
 
             items.append(
                 UserCard(
@@ -204,28 +194,26 @@ class BansView(ft.Container):
         name = user.get("displayName", "Unknown")
         uid = user.get("id")
         
-        def confirm(e):
-             self.page.close(dlg)
-             async def do_unban():
-                 success = await self.api.unban_user(self.group.get("id"), uid)
-                 if success:
-                     self.page.open(ft.SnackBar(content=ft.Text(f"Unbanned {name}"), bgcolor=colors.success))
-                     self.api.invalidate_bans_cache(self.group.get("id"))
-                     await self._load_all_bans()
-                 else:
-                     self.page.open(ft.SnackBar(content=ft.Text("Unban failed"), bgcolor=colors.danger))
-             self.page.run_task(do_unban)
-             
-        dlg = ft.AlertDialog(
-            title=ft.Text("Unban User?"),
-            content=ft.Text(f"Are you sure you want to unban {name}?"),
-            actions=[
-                ft.TextButton("Cancel", on_click=lambda e: self.page.close(dlg)),
-                ft.TextButton("Unban", style=ft.ButtonStyle(color=colors.success), on_click=confirm),
-            ],
-            bgcolor=colors.bg_elevated,
+        def do_unban():
+            async def unban_action():
+                success = await self.api.unban_user(self.group.get("id"), uid)
+                if success:
+                    self.page.open(ft.SnackBar(content=ft.Text(f"Unbanned {name}"), bgcolor=colors.success))
+                    self.api.invalidate_bans_cache(self.group.get("id"))
+                    await self._load_all_bans()
+                else:
+                    self.page.open(ft.SnackBar(content=ft.Text("Unban failed"), bgcolor=colors.danger))
+            self.page.run_task(unban_action)
+        
+        show_confirm_dialog(
+            self.page,
+            title="Unban User?",
+            message=f"Are you sure you want to unban {name}?",
+            on_confirm=do_unban,
+            confirm_text="Unban",
+            variant="primary",
+            icon=ft.Icons.PERSON_ADD_ROUNDED,
         )
-        self.page.open(dlg)
         
     def _show_user_search_dialog(self):
         """Show dialog to search VRChat users to ban"""

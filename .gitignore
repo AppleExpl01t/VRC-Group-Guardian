@@ -14,6 +14,7 @@
 !assets/**
 !demo_build_v2.py
 !DASHBOARD_TASKS.md
+!ROADMAP.md
 !build_log_manual.txt
  
 !create_app_zip.py

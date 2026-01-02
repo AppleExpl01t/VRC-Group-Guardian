@@ -5,7 +5,7 @@ Gradient buttons with glow effects and hover animations
 """
 
 import flet as ft
-from ..theme import colors, radius, shadows, spacing, typography
+from ..theme import colors, radius, shadows, spacing, typography, get_contrast_text_color, hex_to_rgb
 
 
 class NeonButton(ft.Container):
@@ -32,7 +32,7 @@ class NeonButton(ft.Container):
         variant: str = VARIANT_PRIMARY,
         icon: str = None,
         width: int = None,
-        height: int = 44,
+        height: int = 36,  # Reduced from 44
         disabled: bool = False,
         loading: bool = False,
         expand: bool = False,
@@ -52,7 +52,7 @@ class NeonButton(ft.Container):
         
         super().__init__(
             content=button_content,
-            padding=ft.padding.symmetric(horizontal=spacing.lg, vertical=spacing.sm),
+            padding=ft.padding.symmetric(horizontal=spacing.lg, vertical=2),  # Reduced vertical padding
             border_radius=radius.md,
             gradient=self._original_gradient if not disabled else None,
             bgcolor=colors.text_disabled if disabled else None,
@@ -69,6 +69,12 @@ class NeonButton(ft.Container):
     
     def _build_content(self) -> ft.Control:
         """Build button content (icon + text or loading spinner)"""
+        
+        # Determine text color based on contrast
+        text_color = colors.text_primary
+        if self._variant == self.VARIANT_PRIMARY:
+            text_color = get_contrast_text_color(colors.accent_primary)
+            
         if self._loading:
             return ft.Row(
                 controls=[
@@ -76,7 +82,7 @@ class NeonButton(ft.Container):
                         width=16,
                         height=16,
                         stroke_width=2,
-                        color=colors.text_primary,
+                        color=text_color,
                     ),
                 ],
                 alignment=ft.MainAxisAlignment.CENTER,
@@ -89,7 +95,7 @@ class NeonButton(ft.Container):
                 ft.Icon(
                     name=self._icon,
                     size=18,
-                    color=colors.text_primary,
+                    color=text_color,
                 )
             )
         
@@ -98,7 +104,7 @@ class NeonButton(ft.Container):
                 self._text,
                 size=typography.size_base,
                 weight=ft.FontWeight.W_600,
-                color=colors.text_primary,
+                color=text_color,
             )
         )
         
@@ -111,7 +117,7 @@ class NeonButton(ft.Container):
     def _get_gradient(self) -> ft.LinearGradient:
         """Get gradient based on variant"""
         gradients = {
-            self.VARIANT_PRIMARY: colors.gradient_button_primary(),
+            self.VARIANT_PRIMARY: colors.gradient_button_primary(), # Now dynamic
             self.VARIANT_SUCCESS: colors.gradient_button_success(),
             self.VARIANT_DANGER: colors.gradient_button_danger(),
             self.VARIANT_WARNING: ft.LinearGradient(
@@ -129,8 +135,22 @@ class NeonButton(ft.Container):
     
     def _get_shadow(self) -> ft.BoxShadow:
         """Get glow shadow based on variant"""
+        
+        # Dynamic primary shadow
+        primary_shadow = None
+        try:
+            r, g, b = hex_to_rgb(colors.accent_primary)
+            primary_shadow = ft.BoxShadow(
+                blur_radius=20,
+                spread_radius=0,
+                color=f"rgba({r}, {g}, {b}, 0.4)",
+                blur_style=ft.ShadowBlurStyle.OUTER,
+            )
+        except:
+             primary_shadow = shadows.glow_purple()
+
         shadow_map = {
-            self.VARIANT_PRIMARY: shadows.glow_purple(),
+            self.VARIANT_PRIMARY: primary_shadow,
             self.VARIANT_SUCCESS: shadows.glow_success(),
             self.VARIANT_DANGER: shadows.glow_danger(),
             self.VARIANT_WARNING: shadows.glow_warning(),
@@ -139,22 +159,23 @@ class NeonButton(ft.Container):
         return shadow_map.get(self._variant)
     
     def _on_hover(self, e: ft.ControlEvent):
-        """Handle hover state"""
+        """Handle hover state - intensify glow (no zoom)"""
         if self._disabled:
             return
             
         if e.data == "true":
-            # Hover IN - intensify glow and scale up
-            self.scale = 1.02
+            # Hover IN - intensify glow only (no scale)
             if self._original_shadow:
-                self.shadow = ft.BoxShadow(
-                    spread_radius=2,
-                    blur_radius=30,
-                    color=self._original_shadow.color.replace("0.4", "0.6") if self._original_shadow.color else None,
-                )
+                self.shadow = [
+                    ft.BoxShadow(
+                        spread_radius=3,
+                        blur_radius=35,
+                        color=self._original_shadow.color.replace("0.4", "0.6") if self._original_shadow.color else None,
+                        blur_style=ft.ShadowBlurStyle.OUTER,
+                    ),
+                ]
         else:
             # Hover OUT
-            self.scale = 1.0
             self.shadow = self._original_shadow
         
         self.update()
@@ -163,15 +184,20 @@ class NeonButton(ft.Container):
         """Handle click with ripple-like feedback"""
         if self._on_click and not self._disabled and not self._loading:
             try:
+                import asyncio
                 import inspect
                 if inspect.iscoroutinefunction(self._on_click):
-                    # Check if 'page' works via self.page (it should if control is mounted)
+                    # Async handler - wrap in async function for run_task
                     if self.page:
-                         self.page.run_task(self._on_click, e)
+                        async def run_async():
+                            await self._on_click(e)
+                        self.page.run_task(run_async)
                 else:
                     self._on_click(e)
             except Exception as ex:
                 print(f"Error in NeonButton click: {ex}")
+                import traceback
+                traceback.print_exc()
     
     def set_loading(self, loading: bool):
         """Set loading state"""
@@ -225,7 +251,7 @@ class IconButton(ft.Container):
         self,
         icon: str,
         on_click = None,
-        size: int = 40,
+        size: int = 36,  # Reduced from 40
         icon_size: int = 20,
         icon_color: str = colors.text_secondary,
         tooltip: str = None,

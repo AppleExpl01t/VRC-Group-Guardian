@@ -76,7 +76,7 @@ class DataFolderSetupDialog(ft.AlertDialog):
                                         padding=10,
                                         bgcolor=COLORS["surface"],
                                         border_radius=8,
-                                        border=ft.border.all(1, COLORS["border"]),
+                                        border=ft.border.all(2, COLORS["border"]),
                                     ),
                                     self.browse_btn,
                                 ],

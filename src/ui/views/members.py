@@ -1,12 +1,16 @@
 import flet as ft
+import logging
 from ..theme import colors, radius, spacing, typography
 from ..components.neon_button import NeonButton, IconButton
 from ..components.glass_card import GlassCard
 from ..components.user_card import UserCard
 from ..dialogs.user_details import show_user_details_dialog
+from ..mixins import SearchableListMixin
 from services.database import get_database
 
-class MembersView(ft.Container):
+logger = logging.getLogger(__name__)
+
+class MembersView(ft.Container, SearchableListMixin):
     """
     View for managing group members using unified UserCard components.
     """
@@ -14,15 +18,13 @@ class MembersView(ft.Container):
         self.group = group
         self.api = api
         self.on_navigate = on_navigate
-        self._members = []
-        self._all_members = []
-        self._loading = False
-        self._search_query = ""
-        self.db = get_database()
-        
-        # UI Elements
-        self._search_field = None
         self._members_list = None
+        self._loading = False
+        
+        # Initialize mixin
+        self._setup_search_mixin()
+        
+        self.db = get_database()
         
         content = self._build_view()
         
@@ -42,10 +44,13 @@ class MembersView(ft.Container):
             return
             
         self._loading = True
-        self._all_members = []
-        self._update_ui()
+        self._set_items([]) # Clear items via mixin
+        self._render_list()
         
         group_id = self.group.get("id")
+        
+        # Load all members
+        all_loaded = []
         
         # Load all members
         offset = 0
@@ -53,36 +58,38 @@ class MembersView(ft.Container):
         has_more = True
         
         while has_more:
-            new_members = await self.api.get_cached_group_members(
-                group_id, 
-                limit=limit, 
-                offset=offset
-            )
-            
-            if len(new_members) < limit:
-                has_more = False
+            try:
+                new_members = await self.api.get_cached_group_members(
+                    group_id, 
+                    limit=limit, 
+                    offset=offset
+                )
                 
-            self._all_members.extend(new_members)
-            offset += len(new_members)
-            
-            # Update UI progressively
-            self._apply_filter()
+                if new_members is None:
+                    # API error handled inside get_cached_group_members generally, but just in case
+                    has_more = False
+                    continue
+
+                if len(new_members) < limit:
+                    has_more = False
+                    
+                all_loaded.extend(new_members)
+                offset += len(new_members)
+                
+                # Update UI progressively
+                self._set_items(all_loaded)
+            except Exception as e:
+                import traceback
+                logger.error(f"Error loading members: {e}")
+                traceback.print_exc()
+                has_more = False
+                self.page.open(ft.SnackBar(ft.Text(f"Failed to load all members: {e}"), bgcolor=colors.danger))
         
         self._loading = False
-        self._apply_filter()
+        self._set_items(all_loaded)
         
-    def _apply_filter(self):
-        if self._search_query:
-            query = self._search_query.lower()
-            self._members = [
-                m for m in self._all_members 
-                if query in m.get("user", {}).get("displayName", "").lower()
-            ]
-        else:
-            self._members = self._all_members.copy()
-        self._update_ui()
-        
-    def _update_ui(self):
+    def _render_list(self):
+        """Render the filtered list (called by mixin)"""
         if self._members_list:
             self._members_list.controls = self._build_member_items()
             if self._loading:
@@ -93,59 +100,67 @@ class MembersView(ft.Container):
                 ))
             if self._members_list.page:
                 self._members_list.update()
+        
+
 
     def _build_view(self):
+        # Header - more compact
         header = ft.Row(
             controls=[
                 ft.Column(
                     controls=[
-                        ft.Text("Members", size=typography.size_2xl, weight=ft.FontWeight.W_700, color=colors.text_primary),
-                        ft.Text(f"Manage members of {self.group.get('name')}", color=colors.text_secondary),
+                        ft.Text("Members", size=typography.size_xl, weight=ft.FontWeight.W_700, color=colors.text_primary),  # Reduced from 2xl
+                        ft.Text(f"Manage members of {self.group.get('name')}", color=colors.text_secondary, size=typography.size_sm), # Reduced from default
                     ],
-                    spacing=spacing.xs,
+                    spacing=0,  # Reduced from xs
                 ),
             ],
         )
         
-        self._search_field = ft.TextField(
-            hint_text="Search members...",
-            prefix_icon=ft.Icons.SEARCH,
-            bgcolor=colors.bg_elevated,
-            border_radius=radius.md,
-            border_color=colors.glass_border,
-            color=colors.text_primary,
-            on_submit=self._handle_search,
-            expand=True,
+        search_field = self._create_search_field(
+            placeholder="Search members...",
+            expand=False,
+            # key="members_search" # Removed to fix focus loss bug
         )
         
-        search_row = ft.Row([
-            self._search_field,
-            IconButton(ft.Icons.SEARCH_ROUNDED, on_click=lambda e: self._handle_search(e))
-        ])
-        
-        self._members_list = ft.ListView(
+        # Members list - tighter grid
+        self._members_list = ft.GridView(
+            max_extent=220,  # Reduced from 240
+            child_aspect_ratio=1.35,  # Adjusted ratio
+            spacing=spacing.sm,  # Reduced from md
+            run_spacing=spacing.sm,  # Reduced from md
             expand=True,
-            spacing=spacing.xs,
         )
         
         return ft.Column([
             header,
-            ft.Container(height=spacing.md),
-            search_row,
-            ft.Container(height=spacing.sm),
+            ft.Container(height=spacing.sm),  # Reduced from md
+            search_field,
+            ft.Container(height=spacing.xs),
             ft.Container(content=self._members_list, expand=True)
         ], expand=True)
         
-    def _handle_search(self, e):
-        self._search_query = self._search_field.value
-        self._apply_filter()
+        # Note: SearchableListMixin update logic needs to be careful not to rebuild the entire view continuously.
+        # However, since we are only calling self._members_list.update() in _render_list, 
+        # the text field (search_field) should NOT lose focus unless the parent itself re-renders.
+        # Reducing spacing between search and content.
+        
+
 
     def _build_member_items(self):
-        if not self._members and not self._loading:
+        # Use _filtered_items from mixin
+        if self._loading and not self._filtered_items:
+             return [ft.Container(
+                 content=ft.ProgressRing(color=colors.accent_primary),
+                 alignment=ft.alignment.center,
+                 height=100
+             )]
+
+        if not self._filtered_items:
             return [ft.Text("No members found", color=colors.text_tertiary, text_align=ft.TextAlign.CENTER)]
             
         items = []
-        for member in self._members:
+        for member in self._filtered_items:
             user = member.get("user", {})
             
             card = UserCard(
@@ -160,7 +175,6 @@ class MembersView(ft.Container):
         return items
 
     def _open_details(self, user):
-        print(f"DEBUG: MembersView._open_details called for user {user.get('displayName')}")
         show_user_details_dialog(
             self.page, 
             user, 

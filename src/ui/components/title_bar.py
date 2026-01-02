@@ -152,7 +152,7 @@ class TitleBar(ft.Container):
         self._version_text.weight = ft.FontWeight.BOLD
         
         # Add pulsing border and background
-        self._version_container.bgcolor = ft.colors.with_opacity(0.15, colors.danger)
+        self._version_container.bgcolor = ft.Colors.with_opacity(0.15, colors.danger)
         self._version_container.border = ft.border.all(1, colors.danger)
         self._version_container.tooltip = f"Update available! Click to download {version}"
         
@@ -161,9 +161,12 @@ class TitleBar(ft.Container):
         
         if self.page:
             try:
-                self.page.update()
+                # Use targeted update to avoid triggering 
+                # full page/component rebuilds that cause TextField focus loss
+                self._version_container.update()
+                self._version_text.update()
                 # Start pulse loop
-                self.page.run_task(self._pulse_loop)
+                # self.page.run_task(self._pulse_loop)
             except:
                 pass
     
@@ -171,13 +174,19 @@ class TitleBar(ft.Container):
         """Animate pulsing effect for update indicator"""
         import asyncio
         while self._update_available and self.page:
-            self._version_container.opacity = 0.6
-            self._version_container.update()
+            try:
+                self._version_container.opacity = 0.6
+                self._version_container.update()  # Only update this control, not page
+            except:
+                pass
             await asyncio.sleep(0.8)
-            if not self._update_available:
+            if not self._update_available or not self.page:
                 break
-            self._version_container.opacity = 1.0
-            self._version_container.update()
+            try:
+                self._version_container.opacity = 1.0
+                self._version_container.update()  # Only update this control, not page
+            except:
+                pass
             await asyncio.sleep(0.8)
     
     def _on_version_click(self, e):
@@ -199,7 +208,8 @@ class TitleBar(ft.Container):
         """Manually check for updates"""
         self._version_text.value = "Checking..."
         if self.page:
-            self.page.update()
+            # Use targeted update to avoid full page rebuild
+            self._version_container.update()
         
         is_available, version, url, notes = await UpdateService.check_for_updates()
         
@@ -209,7 +219,8 @@ class TitleBar(ft.Container):
             self._version_text.value = f"v{UpdateService.CURRENT_VERSION} ✓"
             self._version_text.color = colors.success
             if self.page:
-                self.page.update()
+                # Use targeted update to avoid full page rebuild
+                self._version_container.update()
                 
             # Reset after 3 seconds
             import asyncio
@@ -217,7 +228,8 @@ class TitleBar(ft.Container):
             self._version_text.value = f"v{UpdateService.CURRENT_VERSION}"
             self._version_text.color = colors.text_tertiary
             if self.page:
-                self.page.update()
+                # Use targeted update to avoid full page rebuild
+                self._version_container.update()
     
     def _minimize_window(self, e):
         """Minimize the window"""

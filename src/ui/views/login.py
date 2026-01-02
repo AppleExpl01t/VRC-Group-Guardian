@@ -6,10 +6,15 @@ Animated transition from login → 2FA
 """
 
 import flet as ft
+import asyncio
 from ..theme import colors, radius, shadows, spacing, typography
 from ..components.glass_card import GlassCard
 from ..components.neon_button import NeonButton
 from ..components.animated_background import SimpleGradientBackground
+from services.debug_logger import get_logger
+from services import focus_debugger as fd
+
+logger = get_logger("login_view")
 
 
 class LoginView(ft.View):
@@ -40,6 +45,7 @@ class LoginView(ft.View):
         self._on_2fa_verify = on_2fa_verify
         self.on_demo_login = on_demo_login
         self._is_loading = False
+        self._is_transitioning = False
         self._2fa_type = "emailOtp"
         
         # UI components
@@ -113,25 +119,27 @@ class LoginView(ft.View):
     
     def _build_login_card(self) -> ft.Container:
         """Build the login form card"""
+        fd.log_info("LoginView: Building login card")
         
-        # Username field
+        # Username field - REMOVED key and focus handlers to fix focus bug
         self._username_field = ft.TextField(
             label="Username or Email",
             value=self._initial_username,
             prefix_icon=ft.Icons.PERSON_ROUNDED,
             border_radius=radius.md,
             bgcolor=colors.bg_elevated,
-            border_color=colors.accent_secondary, # More visible border
+            border_color=colors.accent_secondary,
             focused_border_color=colors.accent_primary,
             label_style=ft.TextStyle(color=colors.text_secondary),
             text_style=ft.TextStyle(color=colors.text_primary),
             cursor_color=colors.accent_secondary,
             on_submit=lambda e: self._password_field.focus(),
+            on_change=self._on_username_change,
             height=48,
-            key="login_username"
+            # NOTE: key removed - Flet bug causes focus loss with key property
         )
         
-        # Password field - Explicitly defined with height
+        # Password field - REMOVED key and focus handlers to fix focus bug
         self._password_field = ft.TextField(
             label="Password",
             value=self._initial_password,
@@ -140,14 +148,15 @@ class LoginView(ft.View):
             can_reveal_password=True,
             border_radius=radius.md,
             bgcolor=colors.bg_elevated,
-            border_color=colors.accent_secondary, # More visible
+            border_color=colors.accent_secondary,
             focused_border_color=colors.accent_primary,
             label_style=ft.TextStyle(color=colors.text_secondary),
             text_style=ft.TextStyle(color=colors.text_primary),
             cursor_color=colors.accent_secondary,
             on_submit=lambda e: self._handle_login(None),
+            on_change=self._on_password_change,
             height=48,
-            key="login_password"
+            # NOTE: key removed - Flet bug causes focus loss with key property
         )
         
         # Error text
@@ -247,11 +256,14 @@ class LoginView(ft.View):
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         )
         
-        # Card content
-        card_content = ft.Column(
-            controls=[logo, ft.Container(height=spacing.xl), form],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            width=340,
+        # Card content - use Container with max_width for responsive sizing
+        card_content = ft.Container(
+            content=ft.Column(
+                controls=[logo, ft.Container(height=spacing.xl), form],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            width=340,  # Desktop width
+            padding=ft.padding.symmetric(horizontal=spacing.md),
         )
         
         return ft.Container(
@@ -274,11 +286,12 @@ class LoginView(ft.View):
         """Build the 2FA verification card"""
         
         # Create 6 digit input boxes
+        # Use slightly smaller size for better mobile fit (6 x 45px + spacing = ~300px)
         self._twofa_fields = []
         for i in range(6):
             field = ft.TextField(
-                width=50,
-                height=60,
+                width=45,  # Reduced from 50 for mobile fit
+                height=55,  # Reduced from 60
                 text_align=ft.TextAlign.CENTER,
                 max_length=1,
                 border_radius=radius.md,
@@ -287,10 +300,11 @@ class LoginView(ft.View):
                 focused_border_color=colors.accent_primary,
                 text_style=ft.TextStyle(
                     color=colors.text_primary,
-                    size=28,
+                    size=24,  # Reduced from 28
                     weight=ft.FontWeight.W_700,
                 ),
                 cursor_color=colors.accent_primary,
+                keyboard_type=ft.KeyboardType.NUMBER,  # Mobile numeric keyboard
                 on_change=lambda e, idx=i: self._on_2fa_digit_change(e, idx),
             )
             self._twofa_fields.append(field)
@@ -340,34 +354,39 @@ class LoginView(ft.View):
             on_click=self._back_to_login,
         )
         
-        # Card content
-        card_content = ft.Column(
-            controls=[
-                tfa_icon,
-                ft.Container(height=spacing.lg),
-                ft.Text(
-                    "Two-Factor Authentication",
-                    size=typography.size_xl,
-                    weight=ft.FontWeight.W_700,
-                    color=colors.text_primary,
-                ),
-                ft.Container(height=spacing.xs),
-                self._twofa_instruction,
-                ft.Container(height=spacing.xl),
-                digit_row,
-                ft.Container(height=spacing.sm),
-                self._twofa_error,
-                ft.Container(height=spacing.lg),
-                ft.Text(
-                    "Enter the 6-digit code sent to you",
-                    size=typography.size_sm,
-                    color=colors.text_tertiary,
-                ),
-                ft.Container(height=spacing.md),
-                back_btn,
-            ],
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            width=380,
+        # Card content - responsive width
+        card_content = ft.Container(
+            content=ft.Column(
+                controls=[
+                    tfa_icon,
+                    ft.Container(height=spacing.lg),
+                    ft.Text(
+                        "Two-Factor Authentication",
+                        size=typography.size_xl,
+                        weight=ft.FontWeight.W_700,
+                        color=colors.text_primary,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Container(height=spacing.xs),
+                    self._twofa_instruction,
+                    ft.Container(height=spacing.xl),
+                    digit_row,
+                    ft.Container(height=spacing.sm),
+                    self._twofa_error,
+                    ft.Container(height=spacing.lg),
+                    ft.Text(
+                        "Enter the 6-digit code sent to you",
+                        size=typography.size_sm,
+                        color=colors.text_tertiary,
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                    ft.Container(height=spacing.md),
+                    back_btn,
+                ],
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            width=360,  # Slightly reduced for mobile fit
+            padding=ft.padding.symmetric(horizontal=spacing.sm),
         )
         
         return ft.Container(
@@ -432,16 +451,21 @@ class LoginView(ft.View):
         elif self._on_login_success:
             self._on_login_success()
     
+
+    
     def _back_to_login(self, e):
-        """Go back to login form"""
+        """Go back to login form using asyncio for transition"""
+        if self._is_transitioning:
+            return
+        self._is_transitioning = True
+        
         # Swap content
         self._card_container.opacity = 0
-        self._card_container.update()
+        if self.page:
+            self.page.update()
         
-        import threading
-        def swap():
-            import time
-            time.sleep(0.3)
+        async def swap():
+            await asyncio.sleep(0.3)
             self._card_container.content = self._login_card
             self._card_container.opacity = 1
             
@@ -453,9 +477,14 @@ class LoginView(ft.View):
             
             if self.page:
                 self.page.update()
+            
+            self._is_transitioning = False
                 
-        threading.Thread(target=swap).start()
-    
+        if self.page:
+            self.page.run_task(swap)
+        else:
+            self._is_transitioning = False
+
     def _set_loading(self, loading: bool):
         """Set loading state"""
         self._is_loading = loading
@@ -466,6 +495,64 @@ class LoginView(ft.View):
         if self.page:
             self.page.update()
     
+    def did_mount(self):
+        """Called when view is added to page"""
+        # Set initial focus safely
+        try:
+            if not self._initial_username:
+                self._username_field.focus()
+            else:
+                self._password_field.focus()
+        except:
+            pass
+
+    def _on_username_change(self, e):
+        """Handle username field change with focus debugging"""
+        fd.log_text_change("username", "<prev>", e.control.value)
+        fd.log_info(f"  _on_username_change: value length = {len(e.control.value)}")
+        self._clear_error_safe()
+    
+    def _on_password_change(self, e):
+        """Handle password field change with focus debugging"""
+        fd.log_text_change("password", "<prev>", f"[{len(e.control.value)} chars]")
+        fd.log_info(f"  _on_password_change: value length = {len(e.control.value)}")
+        self._clear_error_safe()
+    
+    def _clear_error_safe(self):
+        """
+        Clear error state WITHOUT calling any update().
+        This is the safe version that won't cause focus loss.
+        """
+        if self._error_text.visible:
+            fd.log_info("  _clear_error_safe: Error was visible, hiding it")
+            self._error_text.visible = False
+            self._username_field.border_color = colors.accent_secondary
+            self._password_field.border_color = colors.accent_secondary
+            # DO NOT CALL UPDATE - let Flet handle it naturally
+            # The old code called update() here which may cause focus issues
+        else:
+            fd.log_info("  _clear_error_safe: Error already hidden, no action")
+
+    def _clear_error(self):
+        """Clear error state - INSTRUMENTED VERSION"""
+        fd.log_warning("_clear_error() CALLED - checking if this causes focus loss")
+        if self._error_text.visible:
+            fd.log_info("  Error is visible, clearing...")
+            self._error_text.visible = False
+            self._username_field.border_color = colors.accent_secondary
+            self._password_field.border_color = colors.accent_secondary
+            
+            # DANGEROUS: These update() calls may cause focus loss
+            fd.log_warning("  About to call _error_text.update()")
+            self._error_text.update()
+            fd.log_warning("  About to call _username_field.update()")
+            self._username_field.update()
+            fd.log_warning("  About to call _password_field.update()")
+            self._password_field.update()
+            fd.log_info("  All updates complete")
+        else:
+            fd.log_info("  Error already hidden, skipping")
+
     def _show_error(self, message: str):
         """Show error on login form"""
         self._error_text.value = message
@@ -491,8 +578,13 @@ class LoginView(ft.View):
         Animate from login form to 2FA form.
         This creates a beautiful transition!
         """
+        if self._is_transitioning:
+            return
+        self._is_transitioning = True
+            
         self._2fa_type = tfa_type
-        print(f"Transitioning to 2FA screen (type: {tfa_type})")
+        # No need to import logger again, usage of global logger is fine or re-fetch if needed
+        logger.debug(f"Transitioning to 2FA screen (type: {tfa_type})")
         
         # Update instruction based on 2FA type
         if tfa_type == "emailOtp":
@@ -506,30 +598,29 @@ class LoginView(ft.View):
         
         # Swap content with fade
         self._card_container.opacity = 0 # Fade out login
-        self._card_container.update()
+        if self.page:
+            self.page.update()
         
-        import threading
-        def swap_to_2fa():
-            import time
-            time.sleep(0.3)
+        async def swap_to_2fa():
+            await asyncio.sleep(0.3)
             self._card_container.content = self._twofa_card
             self._card_container.opacity = 1 # Fade in 2FA
             if self.page:
                 self.page.update()
-        
-        threading.Thread(target=swap_to_2fa).start()
-        
-        # Focus first 2FA field after a short delay
-        import asyncio
-        async def focus_first():
+            
+            # Focus first 2FA field after a short delay
             await asyncio.sleep(0.5)
             if self._twofa_fields:
                 self._twofa_fields[0].focus()
             if self.page:
                 self.page.update()
+                
+            self._is_transitioning = False
         
         if self.page:
-            self.page.run_task(focus_first)
+            self.page.run_task(swap_to_2fa)
+        else:
+            self._is_transitioning = False
     
     def show_2fa_error(self, message: str):
         """Show error on 2FA form"""

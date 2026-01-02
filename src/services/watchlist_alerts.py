@@ -1,10 +1,12 @@
 """
 Watchlist Alert Service
 =======================
-Monitors VRChat log events and sends in-game notifications when
+Monitors VRChat log events and sends notifications when
 watchlisted users join the current instance.
 
-Uses the VRChat invite message API to send self-invites with alert messages.
+Supports multiple notification methods:
+1. XSOverlay - VR-native toast notifications (preferred)
+2. VRChat invite messages - Fallback in-game notifications
 """
 
 import asyncio
@@ -13,6 +15,20 @@ from typing import Optional, Callable, Dict, Any, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Import XSOverlay service (lazy import to avoid circular deps)
+_xsoverlay_service = None
+
+def _get_xsoverlay():
+    """Lazy import XSOverlay service"""
+    global _xsoverlay_service
+    if _xsoverlay_service is None:
+        try:
+            from services.xsoverlay import get_xsoverlay_service
+            _xsoverlay_service = get_xsoverlay_service()
+        except ImportError:
+            logger.warning("XSOverlay service not available")
+    return _xsoverlay_service
 
 # Default tags that users will likely want
 DEFAULT_TAGS = [
@@ -33,11 +49,15 @@ DEFAULT_TAGS = [
 
 class WatchlistAlertService:
     """
-    Service that monitors player joins and sends VRChat notifications
+    Service that monitors player joins and sends notifications
     for watchlisted users.
+    
+    Supports:
+    - XSOverlay: VR-native toast notifications (preferred)
+    - VRChat Invite: In-game notification fallback
     """
     
-    # Alert message must fit in 64 characters
+    # Alert message must fit in 64 characters (for VRC invite fallback)
     MAX_MESSAGE_LENGTH = 64
     
     # Use slot 11 (last slot) for dynamic alerts
@@ -57,6 +77,11 @@ class WatchlistAlertService:
         self._current_instance_id: Optional[str] = None
         self._pending_alerts: List[Dict] = []
         self._alert_cooldown = 2.0  # seconds between alerts
+        
+        # XSOverlay settings
+        self.xsoverlay_enabled = True  # Prefer XSOverlay when available
+        self.xsoverlay_connected = False
+        self.vrc_invite_fallback = True  # Fall back to VRC invites if XSOverlay unavailable
         
     def set_api(self, api_client):
         """Set the API client (can be done after init)"""
@@ -112,19 +137,18 @@ class WatchlistAlertService:
         max_name_len = self.MAX_MESSAGE_LENGTH - 3  # "⚠️ " prefix
         return f"⚠️ {username[:max_name_len]}"
     
-    async def send_alert(self, username: str, user_id: str, tags: List[str]) -> bool:
+    async def send_alert(self, username: str, user_id: str, tags: List[str], user_thumbnail: Optional[str] = None) -> bool:
         """
-        Send an in-game alert notification when a watchlisted user joins.
+        Send an alert notification when a watchlisted user joins.
         
-        Uses the Reset → Edit → Self-Invite pattern to bypass the 60-minute
-        message edit cooldown and include a custom alert message.
-        
-        Optimized to check if message is already set to avoid unnecessary API calls.
+        Tries XSOverlay first for VR-native notifications, then falls back
+        to VRChat invite messages if XSOverlay is unavailable.
         
         Args:
             username: Display name of the watchlisted user
             user_id: VRChat user ID
             tags: List of tag names for this user
+            user_thumbnail: Optional base64 user thumbnail for XSOverlay
             
         Returns:
             True if alert sent successfully, False otherwise
@@ -132,7 +156,58 @@ class WatchlistAlertService:
         if not self.enabled:
             logger.debug("Alert service disabled")
             return False
-            
+        
+        # Determine severity based on tags
+        danger_tags = {"Crasher", "Predator", "Zoophile"}
+        warning_tags = {"Suspicious", "Harassment", "Bad Vibes", "Mute Evader"}
+        
+        severity = "info"
+        for tag in tags:
+            if tag in danger_tags:
+                severity = "danger"
+                break
+            elif tag in warning_tags:
+                severity = "warning"
+        
+        # Try XSOverlay first (preferred VR-native method)
+        xso_sent = False
+        if self.xsoverlay_enabled:
+            xso = _get_xsoverlay()
+            if xso:
+                try:
+                    xso_sent = await xso.send_watchlist_alert(
+                        username=username,
+                        tags=tags,
+                        user_thumbnail=user_thumbnail,
+                        severity=severity
+                    )
+                    if xso_sent:
+                        self.xsoverlay_connected = True
+                        self.last_alert_time = datetime.now()
+                        logger.info(f"✅ XSOverlay alert sent: {username} [{', '.join(tags)}]")
+                        
+                        # Also trigger haptics for danger alerts
+                        if severity == "danger" and xso.config.haptics_enabled:
+                            await xso.play_haptics(duration_ms=200, intensity=1.0)
+                        
+                        return True
+                except Exception as e:
+                    logger.warning(f"XSOverlay alert failed: {e}")
+                    self.xsoverlay_connected = False
+        
+        # Fall back to VRC invite if XSOverlay failed or disabled
+        if not xso_sent and self.vrc_invite_fallback:
+            return await self._send_vrc_invite_alert(username, user_id, tags)
+        
+        return False
+    
+    async def _send_vrc_invite_alert(self, username: str, user_id: str, tags: List[str]) -> bool:
+        """
+        Legacy VRC invite-based alert (fallback method).
+        
+        Uses the Reset → Edit → Self-Invite pattern to bypass the 60-minute
+        message edit cooldown and include a custom alert message.
+        """
         if not self.api:
             logger.warning("No API client set for alert service")
             return False
@@ -145,7 +220,7 @@ class WatchlistAlertService:
         try:
             # Format the alert message
             message = self.format_alert_message(username, tags)
-            logger.info(f"Sending watchlist alert: {message}")
+            logger.info(f"Sending VRC invite alert: {message}")
             
             # Try to set up custom message (may fail due to rate limit)
             message_ready = False
@@ -204,16 +279,16 @@ class WatchlistAlertService:
             if invite_ok:
                 self.last_alert_time = datetime.now()
                 if message_ready:
-                    logger.info(f"✅ Watchlist alert sent: {message}")
+                    logger.info(f"✅ VRC invite alert sent: {message}")
                 else:
-                    logger.info(f"✅ Watchlist alert sent (generic)")
+                    logger.info(f"✅ VRC invite alert sent (generic)")
                 return True
             else:
                 logger.warning("Self-invite failed - alert may not appear")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error sending watchlist alert: {e}")
+            logger.error(f"Error sending VRC invite alert: {e}")
             return False
     
     def on_event(self, event: Dict[str, Any]):
@@ -261,6 +336,57 @@ class WatchlistAlertService:
             # Brief delay between multiple alerts
             if self._pending_alerts:
                 await asyncio.sleep(self._alert_cooldown)
+    
+    async def connect_xsoverlay(self) -> bool:
+        """
+        Connect to XSOverlay for VR notifications.
+        
+        Returns:
+            True if connected successfully
+        """
+        if not self.xsoverlay_enabled:
+            return False
+            
+        xso = _get_xsoverlay()
+        if xso:
+            connected = await xso.connect()
+            self.xsoverlay_connected = connected
+            return connected
+        return False
+    
+    async def disconnect_xsoverlay(self):
+        """Disconnect from XSOverlay"""
+        xso = _get_xsoverlay()
+        if xso:
+            await xso.disconnect()
+            self.xsoverlay_connected = False
+    
+    async def test_xsoverlay(self) -> bool:
+        """
+        Send a test notification to XSOverlay.
+        
+        Returns:
+            True if test notification sent successfully
+        """
+        xso = _get_xsoverlay()
+        if xso:
+            return await xso.test_notification()
+        return False
+    
+    def get_xsoverlay_status(self) -> dict:
+        """
+        Get the current XSOverlay status.
+        
+        Returns:
+            Dict with enabled, connected status
+        """
+        xso = _get_xsoverlay()
+        return {
+            "enabled": self.xsoverlay_enabled,
+            "connected": self.xsoverlay_connected,
+            "available": xso is not None,
+            "vrc_fallback": self.vrc_invite_fallback,
+        }
 
 
 # Singleton instance

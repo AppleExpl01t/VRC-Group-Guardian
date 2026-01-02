@@ -69,7 +69,7 @@ class StatusBadge(ft.Container):
             ),
             border_radius=radius.full,
             bgcolor=self._colors["bg"],
-            border=ft.border.all(1, self._colors["border"]),
+            border=ft.border.all(2, self._colors["border"]),
             shadow=ft.BoxShadow(
                 spread_radius=0,
                 blur_radius=10,

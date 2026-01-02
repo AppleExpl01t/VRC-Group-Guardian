@@ -41,6 +41,7 @@ class HistoryView(ft.Container):
         self._tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
+            height=40,  # Compact tabs
             tabs=[
                 ft.Tab(
                     text="Recent Joins",
@@ -55,9 +56,9 @@ class HistoryView(ft.Container):
         )
         
         return ft.Column([
-            ft.Text("History & Database", size=typography.size_2xl, weight="bold", color=colors.text_primary),
+            ft.Text("History & Database", size=typography.size_xl, weight="bold", color=colors.text_primary),  # Reduced from 2xl
             self._tabs,
-            ft.Divider(color=colors.glass_border),
+            ft.Divider(color=colors.glass_border, height=1),
             self._content_area,
         ], expand=True)
 
@@ -106,13 +107,22 @@ class HistoryView(ft.Container):
                     api=self.api,
                     db=self._db,
                     subtitle=sub,
+                    compact=True,  # Use compact mode
                     on_click=lambda e, u=user_data: show_user_details_dialog(
                         self.page, u, self.api, self._db
                     )
                 )
             )
         
-        self._content_area.controls = items
+        grid = ft.GridView(
+            max_extent=220,  # Reduced from 240
+            child_aspect_ratio=1.1,  # Taller ratio
+            spacing=spacing.sm,  # Reduced from md
+            run_spacing=spacing.sm,  # Reduced from md
+            expand=True
+        )
+        grid.controls = items
+        self._content_area.controls = [grid]
 
     def _render_users_tab(self):
         # We need a search box for users because there could be thousands
@@ -121,14 +131,22 @@ class HistoryView(ft.Container):
              hint_text="Search local user database...",
              on_submit=self._do_search_users,
              border_radius=radius.md,
-             bgcolor=colors.bg_elevated
+             bgcolor=colors.bg_elevated,
+             height=36,  # Compact height
+             text_size=typography.size_sm
         )
         
-        self._user_list_col = ft.Column(scroll="auto", expand=True, spacing=spacing.sm)
+        self._user_list_col = ft.GridView(
+            max_extent=220,  # Reduced from 240
+            child_aspect_ratio=1.1,  # Taller ratio
+            spacing=spacing.sm,  # Reduced from md
+            run_spacing=spacing.sm,  # Reduced from md
+            expand=True
+        )
         
         self._content_area.controls = [
             search_field,
-            ft.Container(height=spacing.sm),
+            ft.Container(height=spacing.xs),  # Reduced from sm
             self._user_list_col
         ]
 

@@ -49,38 +49,38 @@ class StatCard(GlassCard):
         )
     
     def _build_content(self) -> ft.Control:
-        """Build the card content layout"""
+        """Build the card content layout - compact version"""
         
-        # Icon with glow background
+        # Icon with glow background - smaller
         icon_container = ft.Container(
             content=ft.Icon(
                 name=self._icon,
-                size=24,
+                size=20,  # Reduced from 24
                 color=self._icon_color,
             ),
-            width=48,
-            height=48,
-            border_radius=radius.md,
+            width=36,  # Reduced from 48
+            height=36,  # Reduced from 48
+            border_radius=radius.sm,  # Smaller radius
             bgcolor=f"rgba({self._hex_to_rgb(self._icon_color)}, 0.15)",
             alignment=ft.alignment.center,
         )
         
-        # Value (large number)
+        # Value (large number) - smaller
         value_text = ft.Text(
             self._value,
-            size=36,
+            size=28,  # Reduced from 36
             weight=ft.FontWeight.W_700,
             color=colors.text_primary,
         )
         
-        # Label
+        # Label - smaller
         label_text = ft.Text(
             self._label,
-            size=typography.size_sm,
+            size=typography.size_xs,  # Reduced from size_sm
             color=colors.text_secondary,
         )
         
-        # Main row with icon and stats
+        # Main row with icon and stats - tighter spacing
         main_content = ft.Row(
             controls=[
                 icon_container,
@@ -94,7 +94,7 @@ class StatCard(GlassCard):
                 ),
             ],
             alignment=ft.MainAxisAlignment.START,
-            spacing=spacing.md,
+            spacing=spacing.sm,  # Reduced from md
         )
         
         # Build subtitle/trend row if exists

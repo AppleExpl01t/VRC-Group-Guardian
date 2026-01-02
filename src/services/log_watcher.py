@@ -152,7 +152,7 @@ class LogWatcher:
         while self.running:
             latest = self._get_latest_log()
             if not latest:
-                time.sleep(2)
+                time.sleep(1)
                 continue
                 
             try:
@@ -200,7 +200,7 @@ class LogWatcher:
                     self._last_db_error_time = current_time
                 time.sleep(1)
             
-            time.sleep(0.5)
+            time.sleep(0.1)
 
     def _process_line(self, line: str, is_backfill: bool = False):
         line = line.strip()

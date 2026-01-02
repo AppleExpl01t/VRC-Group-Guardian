@@ -390,3 +390,137 @@ class MockVRChatAPI:
             })
         
         return results
+
+    # ==================== CACHED METHODS ====================
+    # These just call the underlying methods in mock mode
+    
+    async def get_cached_user(self, user_id: str, force_refresh: bool = False) -> Optional[Dict]:
+        """Mock cached user fetch"""
+        return await self.get_user(user_id)
+    
+    async def get_cached_group(self, group_id: str, force_refresh: bool = False) -> Optional[Dict]:
+        """Mock cached group fetch"""
+        await asyncio.sleep(0.1)
+        groups = await self.get_my_groups()
+        for g in groups:
+            if g["id"] == group_id:
+                return g
+        return None
+    
+    async def get_cached_group_instances(self, group_id: str, force_refresh: bool = False) -> List[Dict]:
+        """Mock cached group instances"""
+        return await self.get_group_instances(group_id)
+    
+    async def get_cached_join_requests(self, group_id: str, force_refresh: bool = False) -> List[Dict]:
+        """Mock cached join requests"""
+        return await self.get_group_join_requests(group_id)
+    
+    async def get_cached_group_bans(self, group_id: str, force_refresh: bool = False) -> List[Dict]:
+        """Mock cached group bans"""
+        return await self.get_group_bans(group_id)
+    
+    async def get_cached_group_members(self, group_id: str, limit: int = 50, offset: int = 0, force_refresh: bool = False) -> List[Dict]:
+        """Mock cached group members"""
+        return await self.search_group_members(group_id, limit=limit, offset=offset)
+    
+    async def get_cached_world(self, world_id: str, force_refresh: bool = False) -> Optional[Dict]:
+        """Mock cached world fetch"""
+        return await self.get_world(world_id)
+
+    # ==================== CACHE INVALIDATION ====================
+    # These are no-ops in mock mode
+    
+    def invalidate_join_requests_cache(self, group_id: str):
+        """Mock cache invalidation"""
+        pass
+    
+    def invalidate_bans_cache(self, group_id: str):
+        """Mock cache invalidation"""
+        pass
+    
+    def invalidate_members_cache(self, group_id: str):
+        """Mock cache invalidation"""
+        pass
+    
+    def invalidate_instances_cache(self, group_id: str):
+        """Mock cache invalidation"""
+        pass
+
+    # ==================== ADDITIONAL METHODS ====================
+
+    async def kick_user(self, group_id: str, user_id: str) -> bool:
+        """Mock kick user from group"""
+        await asyncio.sleep(0.5)
+        # Remove from members
+        if group_id in self._members_store:
+            self._members_store[group_id] = [m for m in self._members_store[group_id] if m["user"]["id"] != user_id]
+        print(f"Mock: Kicked user {user_id} from group {group_id}")
+        return True
+
+    async def search_worlds(self, query: str, n: int = 10, offset: int = 0, sort: str = "relevance") -> List[Dict]:
+        """Mock world search"""
+        await asyncio.sleep(0.3)
+        
+        mock_worlds = [
+            {"id": "wrld_mock_1", "name": f"The Great Pug - {query}", "authorName": "OwlBoy", "thumbnailImageUrl": "", "occupants": random.randint(10, 100)},
+            {"id": "wrld_mock_2", "name": f"{query} Hangout", "authorName": "VRCDev", "thumbnailImageUrl": "", "occupants": random.randint(5, 50)},
+            {"id": "wrld_mock_3", "name": f"{query} World", "authorName": "Creator123", "thumbnailImageUrl": "", "occupants": random.randint(0, 20)},
+        ]
+        
+        return mock_worlds[:min(n, len(mock_worlds))]
+
+    async def get_world(self, world_id: str) -> Optional[Dict]:
+        """Mock get world details"""
+        await asyncio.sleep(0.1)
+        return {
+            "id": world_id,
+            "name": f"Mock World ({world_id[-4:]})",
+            "authorName": "MockAuthor",
+            "description": "This is a mock world for demo mode.",
+            "thumbnailImageUrl": "https://assets.vrchat.com/www/avatars/default_v2.png",
+            "capacity": 32,
+            "occupants": random.randint(0, 32),
+        }
+
+    async def self_invite(self, world_id: str, instance_id: str, message_slot: int = None) -> bool:
+        """Mock self-invite"""
+        await asyncio.sleep(0.2)
+        print(f"Mock: Self-invite sent to {world_id}:{instance_id}")
+        return True
+
+    async def get_group_online_members(self, group_id: str, limit: int = 1000) -> List[Dict]:
+        """Mock get online group members"""
+        await asyncio.sleep(0.3)
+        # Return half of the members as "online"
+        all_members = self._members_store.get(group_id, [])
+        online_members = []
+        for m in all_members[:len(all_members) // 2 + 1]:
+            member = m.copy()
+            member["user"] = m["user"].copy()
+            member["user"]["location"] = "wrld_123:instance_1"  # Give them a location
+            member["user"]["status"] = random.choice(["active", "join me", "ask me"])
+            online_members.append(member["user"])
+        return online_members
+
+    async def get_invite_messages(self, message_type: str = "message") -> List[Dict]:
+        """Mock get invite messages"""
+        return []
+
+    async def update_invite_message(self, message_type: str, slot: int, message: str) -> bool:
+        """Mock update invite message"""
+        await asyncio.sleep(0.1)
+        return True
+
+    async def reset_invite_message(self, message_type: str, slot: int) -> bool:
+        """Mock reset invite message"""
+        await asyncio.sleep(0.1)
+        return True
+
+    async def get_group_roles(self, group_id: str) -> List[Dict]:
+        """Mock get group roles"""
+        return [
+            {"id": "role_1", "name": "Admin", "permissions": ["*"]},
+            {"id": "role_2", "name": "Moderator", "permissions": ["group.ban", "group.kick"]},
+            {"id": "role_3", "name": "Member", "permissions": []},
+        ]
+

@@ -1,0 +1,63 @@
+"""
+UI Utilities Package
+====================
+Responsive design and helper utilities
+"""
+
+from .responsive import (
+    DeviceType,
+    ResponsiveConfig,
+    MOBILE_CONFIG,
+    TABLET_CONFIG,
+    DESKTOP_CONFIG,
+    is_mobile_platform,
+    is_android,
+    is_ios,
+    is_touch_device,
+    is_desktop,
+    get_screen_width,
+    get_screen_height,
+    get_device_type,
+    get_config,
+    responsive_value,
+    responsive_col,
+    get_dialog_width,
+    get_grid_extent,
+    get_button_height,
+    get_icon_size,
+    get_avatar_size,
+    should_show_sidebar,
+    should_use_bottom_nav,
+    should_enable_blur,
+    ResponsiveSpacing,
+    ResponsiveTypography,
+)
+
+__all__ = [
+    "DeviceType",
+    "ResponsiveConfig",
+    "MOBILE_CONFIG",
+    "TABLET_CONFIG", 
+    "DESKTOP_CONFIG",
+    "is_mobile_platform",
+    "is_android",
+    "is_ios",
+    "is_touch_device",
+    "is_desktop",
+    "get_screen_width",
+    "get_screen_height",
+    "get_device_type",
+    "get_config",
+    "responsive_value",
+    "responsive_col",
+    "get_dialog_width",
+    "get_grid_extent",
+    "get_button_height",
+    "get_icon_size",
+    "get_avatar_size",
+    "should_show_sidebar",
+    "should_use_bottom_nav",
+    "should_enable_blur",
+    "ResponsiveSpacing",
+    "ResponsiveTypography",
+]

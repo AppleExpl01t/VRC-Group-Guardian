@@ -6,6 +6,7 @@ Features local watchlist management and note-taking.
 """
 
 import asyncio
+import logging
 from datetime import datetime
 import flet as ft
 from ..theme import colors, radius, spacing, typography
@@ -14,6 +15,10 @@ from ..components.neon_button import NeonButton
 from ..components.user_card import UserCard
 from services.log_watcher import get_log_watcher
 from services.database import get_database
+from services.watchlist_service import get_watchlist_service
+from services.notification_service import get_notification_service
+
+logger = logging.getLogger(__name__)
 
 class LiveInstanceView(ft.Container):
     """
@@ -75,7 +80,11 @@ class LiveInstanceView(ft.Container):
         self._update_header()
 
     def _refresh_watchlist_cache(self):
-        """Load active user metadata from DB"""
+        """Load active user metadata from centralized watchlist service"""
+        watchlist_svc = get_watchlist_service()
+        watchlist_svc.refresh_cache()
+        
+        # Also cache active users' data for quick local reference
         active = self._db.get_active_users()
         for u in active:
             uid = u["user_id"]
@@ -89,18 +98,25 @@ class LiveInstanceView(ft.Container):
         """Handle event from LogWatcher"""
         evt_type = event.get("type")
         ts = datetime.now().strftime("%H:%M:%S")
+        notif_service = get_notification_service()
         
         if evt_type == "player_join":
             uid = event["user_id"]
             name = event["display_name"]
             self._players[uid] = name
             
-            # Check DB for watchlist status
-            user_data = self._db.get_user_data(uid)
-            if user_data:
-                self._watchlist_cache[uid] = user_data
-                if user_data.get("is_watchlisted"):
-                    self._add_watchlist_event(f"WATCHLIST: {name} joined", colors.accent_primary, ts)
+            # Check watchlist using centralized service - ensures user is recorded
+            watchlist_svc = get_watchlist_service()
+            status = watchlist_svc.check_and_record_user(uid, name)
+            self._watchlist_cache[uid] = status
+            
+            if status.get("is_watchlisted"):
+                self._add_watchlist_event(f"WATCHLIST: {name} joined", colors.accent_primary, ts)
+                # Play watchlist alert sound (higher priority)
+                notif_service.notify_watchlist_alert(name)
+            else:
+                # Play regular player join sound
+                notif_service.notify_player_join(name)
             
             self._add_join(name, ts)
             self._update_player_list()
@@ -113,6 +129,9 @@ class LiveInstanceView(ft.Container):
                 del self._players[uid]
             if uid in self._avatars:
                 del self._avatars[uid]
+            
+            # Play player leave sound
+            notif_service.notify_player_leave(name)
             
             self._add_leave(name, ts)
             self._update_player_list()
@@ -253,13 +272,13 @@ class LiveInstanceView(ft.Container):
         
         self._header_text = ft.Text(
             "Live Monitor",
-            size=typography.size_2xl,
+            size=typography.size_xl,  # Reduced from 2xl
             weight=ft.FontWeight.W_700,
             color=colors.text_primary,
         )
         self._header_subtext = ft.Text(
             "Waiting for instance connection...",
-            size=typography.size_base,
+            size=typography.size_sm,  # Reduced from base
             color=colors.text_secondary,
         )
         
@@ -267,7 +286,7 @@ class LiveInstanceView(ft.Container):
             controls=[
                 ft.Column(
                     controls=[self._header_text, self._header_subtext],
-                    spacing=spacing.xs,
+                    spacing=0,  # Reduced from xs
                 ),
                 ft.Row([
                     NeonButton(
@@ -283,7 +302,14 @@ class LiveInstanceView(ft.Container):
         )
         
         # Columns
-        self._player_list = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO)
+        self._player_list = ft.GridView(
+            max_extent=180,
+            child_aspect_ratio=0.85,
+            spacing=spacing.xs,
+            run_spacing=spacing.xs,
+            expand=True,
+            padding=spacing.xs,
+        )
         self._join_list = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO)
         self._leave_list = ft.Column(spacing=2, scroll=ft.ScrollMode.AUTO)
         
@@ -427,7 +453,7 @@ class LiveInstanceView(ft.Container):
             bgcolor=colors.bg_glass,
             border_radius=radius.md,
             padding=spacing.xs,
-            border=ft.border.all(1, colors.glass_border)
+            border=ft.border.all(2, colors.glass_border)
         )
         
         cancel_btn = NeonButton("Cancel", variant="danger", height=36)
@@ -476,14 +502,14 @@ class LiveInstanceView(ft.Container):
         self._invite_progress_container.update()
         
         try:
-            print("[DEBUG] Starting invite process...")
+            logger.debug("Starting invite process...")
             # 1. Get Location
             status_text.value = "Fetching current location..."
             progress_bar.type = ft.ProgressRing
             status_text.update()
             
             location = await self.api.get_my_location()
-            print(f"[DEBUG] Location result: {location}")
+            logger.debug(f"Location result: {location}")
             
             if not self._is_inviting: return # Check cancel
             
@@ -494,9 +520,9 @@ class LiveInstanceView(ft.Container):
                         "world_id": self._watcher.current_world_id,
                         "instance_id": self._watcher.current_instance_id,
                     }
-                    print(f"[DEBUG] Using fallback location from watcher: {location}")
+                    logger.debug(f"Using fallback location from watcher: {location}")
                 else:
-                    print("[DEBUG] Could not determine location.")
+                    logger.debug("Could not determine location.")
                     status_text.value = "Error: Could not determine location (must be in an instance)."
                     status_text.color = colors.danger
                     cancel_btn.text = "Close"
@@ -516,36 +542,36 @@ class LiveInstanceView(ft.Container):
                 world_info = await self.api.get_world(world_id)
                 if world_info:
                     world_name = world_info.get("name")
-                    print(f"[DEBUG] Fetched world name: {world_name}")
+                    logger.debug(f"Fetched world name: {world_name}")
             except Exception as e:
-                print(f"[DEBUG] Failed to fetch world info: {e}")
+                logger.debug(f"Failed to fetch world info: {e}")
                 pass
 
             # 2. Get Members to Invite
             group_id = getattr(self._watcher, 'current_group_id', None)
-            print(f"[DEBUG] Current group ID from watcher: {group_id}")
+            logger.debug(f"Current group ID from watcher: {group_id}")
             
             if group_id:
                 status_text.value = f"Fetching online members for group {group_id}..."
                 status_text.update()
-                print(f"[DEBUG] calling get_group_online_members for {group_id}")
+                logger.debug(f"Calling get_group_online_members for {group_id}")
                 members_to_invite = await self.api.get_group_online_members(group_id)
                 target_type = "members"
             else:
                 status_text.value = f"No active group detected. Fetching online friends..."
                 status_text.update()
-                print(f"[DEBUG] calling get_all_friends")
+                logger.debug("Calling get_all_friends")
                 friends = await self.api.get_all_friends()
                 members_to_invite = [f for f in friends if f.get("location") != "offline"]
                 target_type = "friends"
             
-            print(f"[DEBUG] Found {len(members_to_invite) if members_to_invite else 0} online {target_type} to invite")
+            logger.debug(f"Found {len(members_to_invite) if members_to_invite else 0} online {target_type} to invite")
 
             if not self._is_inviting: return
 
             if not members_to_invite:
                 status_text.value = f"No online {target_type} found to invite."
-                print(f"[DEBUG] No members to invite. Aborting.")
+                logger.debug("No members to invite. Aborting.")
                 cancel_btn.text = "Close"
                 cancel_btn.on_click = close_card
                 cancel_btn.set_disabled(False)
@@ -563,13 +589,13 @@ class LiveInstanceView(ft.Container):
             
             for i, member in enumerate(members_to_invite):
                 if not self._is_inviting:
-                    print("[DEBUG] Invite process cancelled by user.")
+                    logger.debug("Invite process cancelled by user.")
                     break
                     
                 member_id = member.get("id") 
                 member_name = member.get("displayName", "Unknown")
                 
-                print(f"[DEBUG] Inviting {member_name} ({member_id})...")
+                logger.debug(f"Inviting {member_name} ({member_id})...")
                 
                 # Log Item
                 try:
@@ -581,9 +607,9 @@ class LiveInstanceView(ft.Container):
                         world_name=world_name
                     )
                     is_success = bool(result)
-                    print(f"[DEBUG] Invite result for {member_name}: {'Success' if is_success else 'Failed'}")
+                    logger.debug(f"Invite result for {member_name}: {'Success' if is_success else 'Failed'}")
                 except Exception as e:
-                    print(f"[DEBUG] Invite error for {member_name}: {e}")
+                    logger.debug(f"Invite error for {member_name}: {e}")
                     is_success = False
 
                 if is_success:
@@ -620,12 +646,12 @@ class LiveInstanceView(ft.Container):
             # Done
             if self._is_inviting:
                 self._show_invite_summary("Invites Sent Successfully", success_count, is_error=False)
-                print(f"[DEBUG] Invite process completed. Sent: {success_count}/{total}")
+                logger.info(f"Invite process completed. Sent: {success_count}/{total}")
             else:
                 self._show_invite_summary("Invite Process Cancelled", success_count, is_error=True)
                 
         except Exception as e:
-            print(f"[DEBUG] CRITICAL Invite Error: {e}")
+            logger.error(f"Critical invite error: {e}")
             self._show_invite_summary(f"Error: {str(e)[:50]}", success_count if 'success_count' in locals() else 0, is_error=True)
             
         finally:

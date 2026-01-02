@@ -81,6 +81,12 @@ class DebugController:
                     result = self._handle_find_keys(cmd_data.get("pattern"))
                 elif cmd_type == "click_pattern":
                     result = await self._handle_click_pattern(cmd_data.get("pattern"))
+                elif cmd_type == "type_text":
+                    result = await self._handle_type_text(cmd_data.get("key"), cmd_data.get("text"))
+                elif cmd_type == "focus":
+                    result = await self._handle_focus(cmd_data.get("key"))
+                elif cmd_type == "get_focus":
+                    result = self._handle_get_focus()
                 else:
                     result = {"error": f"Unknown command: {cmd_type}"}
                 
@@ -170,6 +176,7 @@ class DebugController:
         if not route:
             raise ValueError("Route is required")
         self.page.go(route)
+        self.page.update()  # Force UI refresh
         return {"new_route": route}
 
     def _handle_inspect_ui(self):
@@ -334,3 +341,126 @@ class DebugController:
             return {"status": "value_set", "key": key, "value": value}
         else:
             raise ValueError(f"Control '{key}' does not support 'value'")
+
+    async def _handle_type_text(self, key, text):
+        """Type text character by character into a TextField, simulating real typing"""
+        if not key:
+            raise ValueError("Key is required")
+        if not text:
+            raise ValueError("Text is required")
+            
+        control = self._find_control(key)
+        if not control:
+            raise ValueError(f"Control with key '{key}' not found")
+            
+        if not hasattr(control, "value"):
+            raise ValueError(f"Control '{key}' does not support 'value'")
+        
+        import asyncio
+        
+        # Focus the control first
+        control.focus()
+        await asyncio.sleep(0.1)
+        
+        # Get current value
+        current_value = control.value or ""
+        
+        logger.debug(f"[ADI] type_text starting: key={key}, text={text}, current_value={current_value}")
+        
+        typed_chars = []
+        for i, char in enumerate(text):
+            # Append character
+            current_value += char
+            control.value = current_value
+            typed_chars.append(char)
+            
+            logger.debug(f"[ADI] Typed char {i}: '{char}', value now: '{current_value}'")
+            
+            # Update control
+            try:
+                control.update()
+            except Exception as e:
+                logger.error(f"[ADI] Control update failed after char '{char}': {e}")
+            
+            # Trigger on_change if exists
+            if hasattr(control, "on_change") and control.on_change:
+                e = ft.ControlEvent(
+                    target=control.uid,
+                    name="change",
+                    data=current_value,
+                    control=control,
+                    page=self.page
+                )
+                import inspect
+                handler = control.on_change
+                if inspect.iscoroutinefunction(handler):
+                    await handler(e)
+                else:
+                    handler(e)
+            
+            # Small delay between keystrokes
+            await asyncio.sleep(0.05)
+            
+            # Check if control is still focused (debug)
+            logger.debug(f"[ADI] After char '{char}': control.value={control.value}")
+        
+        # Final check
+        final_value = control.value
+        logger.debug(f"[ADI] type_text complete: final_value={final_value}")
+        
+        return {
+            "status": "typed", 
+            "key": key, 
+            "text": text, 
+            "final_value": final_value,
+            "chars_typed": len(typed_chars)
+        }
+    
+    async def _handle_focus(self, key):
+        """Focus a specific control"""
+        if not key:
+            raise ValueError("Key is required")
+            
+        control = self._find_control(key)
+        if not control:
+            raise ValueError(f"Control with key '{key}' not found")
+        
+        if hasattr(control, "focus"):
+            control.focus()
+            import asyncio
+            await asyncio.sleep(0.1)
+            return {"status": "focused", "key": key}
+        else:
+            raise ValueError(f"Control '{key}' does not support focus()")
+    
+    def _handle_get_focus(self):
+        """Get info about currently focused control (if trackable)"""
+        # Flet doesn't have a direct "get focused control" API
+        # But we can try to check autofocus state on fields
+        if not self.page.views:
+            return {"focused": None, "note": "No views"}
+        
+        current_view = self.page.views[-1]
+        focused_info = []
+        
+        def walk(control):
+            # Check for autofocus or any focus indicator
+            if hasattr(control, "autofocus") and control.autofocus:
+                info = {"type": type(control).__name__}
+                if hasattr(control, "key") and control.key:
+                    info["key"] = control.key
+                if hasattr(control, "value"):
+                    info["value"] = str(control.value)[:50] if control.value else None
+                focused_info.append(info)
+            
+            if hasattr(control, "controls") and control.controls:
+                for c in control.controls:
+                    if c: walk(c)
+            if hasattr(control, "content") and control.content:
+                walk(control.content)
+
+        for c in current_view.controls:
+            walk(c)
+        
+        return {"autofocus_controls": focused_info, "note": "Flet doesn't expose current focus directly"}
+

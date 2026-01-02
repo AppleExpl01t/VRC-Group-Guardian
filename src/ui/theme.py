@@ -63,12 +63,21 @@ class Colors:
             colors=["rgba(40, 30, 70, 0.4)", "rgba(20, 40, 60, 0.4)"],
         )
     
-    @staticmethod
-    def gradient_button_primary() -> ft.LinearGradient:
+    def gradient_button_primary(self) -> ft.LinearGradient:
+        """Dynamic primary gradient based on accent color"""
+        c1 = self.accent_primary
+        # Simple algorithm to generate a secondary color for the gradient (shift hue or brightness)
+        # For robustness, we'll just use the same color for now or a slightly transparent version?
+        # A gradient from Color -> Color usually looks flat. 
+        # Let's try to generate a matching gradient. 
+        # Since we don't have numpy/heavy libs, we'll accept a subtle shift or just use the color itself twice.
+        # However, to maintain the "Neon" look, a slight variation is best.
+        # We'll import the helper below to adjust brightness.
+        c2 = adjust_brightness(c1, 0.8) # Darker
         return ft.LinearGradient(
             begin=ft.alignment.top_left,
             end=ft.alignment.bottom_right,
-            colors=["#8b5cf6", "#6366f1"],
+            colors=[c1, c2],
         )
     
     @staticmethod
@@ -87,18 +96,72 @@ class Colors:
             colors=["#ef4444", "#dc2626"],
         )
 
+def hex_to_rgb(hex_color: str):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+def adjust_brightness(hex_color: str, factor: float) -> str:
+    """Adjust brightness of hex color"""
+    try:
+        r, g, b = hex_to_rgb(hex_color)
+        r = min(255, max(0, int(r * factor)))
+        g = min(255, max(0, int(g * factor)))
+        b = min(255, max(0, int(b * factor)))
+        return f"#{r:02x}{g:02x}{b:02x}"
+    except:
+        return hex_color
+
+def get_contrast_text_color(hex_color: str) -> str:
+    """Return black or white text color based on background luminance"""
+    try:
+        r, g, b = hex_to_rgb(hex_color)
+        # Calculate luminance (standard formula)
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+        if luminance > 0.5:
+            return "#000000" # Black for light backgrounds
+        return "#ffffff" # White for dark backgrounds
+    except:
+        return "#ffffff"
+
 
 @dataclass
 class Spacing:
-    """Spacing system - 8px grid"""
+    """Spacing system - 8px grid, optimized for minimal scrolling"""
     
-    xs: int = 4
-    sm: int = 8
-    md: int = 16
-    lg: int = 24
-    xl: int = 32
-    xxl: int = 48
-    xxxl: int = 64
+    # Reduced defaults for tighter layouts
+    xs: int = 2
+    sm: int = 4
+    md: int = 8
+    lg: int = 12
+    xl: int = 16
+    xxl: int = 24
+    xxxl: int = 32
+
+    @property
+    def mobile(self):
+        """Mobile overrides (smaller spacing)"""
+        return Spacing(
+            xs=2,
+            sm=4,
+            md=6,
+            lg=8,
+            xl=12,
+            xxl=16,
+            xxxl=24
+        )
+    
+    @property
+    def comfortable(self):
+        """Original spacing for those who prefer more breathing room"""
+        return Spacing(
+            xs=4,
+            sm=8,
+            md=16,
+            lg=24,
+            xl=32,
+            xxl=48,
+            xxxl=64
+        )
 
 
 @dataclass
@@ -183,6 +246,19 @@ class Typography:
     size_xl: int = 24
     size_2xl: int = 32
     size_3xl: int = 48
+
+    @property
+    def mobile(self):
+        """Mobile overrides (larger text for readability)"""
+        return Typography(
+            size_xs=12,
+            size_sm=14,
+            size_base=16,
+            size_lg=20,
+            size_xl=26,
+            size_2xl=34,
+            size_3xl=50
+        )
 
 
 # Create singleton instances

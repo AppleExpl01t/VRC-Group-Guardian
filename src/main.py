@@ -79,9 +79,15 @@ from services.log_watcher import get_log_watcher
 from services.watchlist_alerts import get_alert_service
 from services.updater import UpdateService
 from services.websocket_pipeline import get_pipeline, get_event_handler
+from services.instance_context import get_instance_context, InstanceContextState
+from services import focus_debugger as fd
 from ui.dialogs.data_folder_setup import show_data_folder_setup
 from utils.paths import is_data_folder_configured
 from services.debug_controller import DebugController
+
+# Initialize focus debugger early
+fd.init_focus_debugger()
+fd.log_info("Main app starting - focus debugger active")
 
 
 class GroupGuardianApp:
@@ -102,6 +108,7 @@ class GroupGuardianApp:
         self._groups = []
         self._pending_requests_count = 0
         self._sidebar = None
+        self._sidebar_collapsed = False # Persistent sidebar state
         
         # Loading state lock to prevent concurrent fetches
         self._loading_groups_lock = False
@@ -120,7 +127,7 @@ class GroupGuardianApp:
         self._update_available = False
         self._update_info = None  # (version, url, notes)
 
-        # Agentic Debug Interface
+        # Agentic Debug Interface - Re-enabled for focus debugging
         self._debug_controller = DebugController(self)
         self._debug_controller.start_listener()
 
@@ -128,46 +135,66 @@ class GroupGuardianApp:
         # Setup theme
         setup_theme(page)
         
-        # Window configuration - frameless for custom title bar
-        page.window.width = 1280
-        page.window.height = 800
-        page.window.min_width = 1024
-        page.window.min_height = 600
-        page.window.center()
-        page.title = "Group Guardian"
-        page.window.frameless = True  # Frameless window for custom title bar
+        # Import responsive utilities for platform detection
+        from ui.utils.responsive import is_mobile_platform, is_touch_device, get_config
         
-        # Set window icon (still used in taskbar)
+        # Store responsive config for use throughout app
+        self._is_mobile = is_mobile_platform(page)
+        self._responsive_config = get_config(page)
+        
+        # Window configuration - conditional on platform
+        # Desktop: custom frameless window with minimum sizes
+        # Mobile: use default system chrome and full screen
+        page.title = "Group Guardian"
+        
         import os
         self._icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "assets", "icon.png"))
-        if os.path.exists(self._icon_path):
-            page.window.icon = self._icon_path
+        
+        if not self._is_mobile:
+            # Desktop configuration
+            page.window.width = 1280
+            page.window.height = 800
+            page.window.min_width = 1024
+            page.window.min_height = 600
+            page.window.center()
+            page.window.frameless = True  # Custom title bar for desktop
+            
+            # Set window icon (used in taskbar)
+            if os.path.exists(self._icon_path):
+                page.window.icon = self._icon_path
+        else:
+            # Mobile configuration
+            # Use system chrome, no minimum sizes (they break mobile)
+            logger.info(f"Running on mobile platform: {page.platform}")
         
         # Route handling
         page.on_route_change = self._on_route_change
+        
+        # Responsive layout - auto-collapse sidebar on narrow windows (desktop only)
+        if not self._is_mobile:
+            page.on_resized = self._on_window_resized
         
         # Show splash immediately to hide login during auto-auth
         self._show_splash()
         
         # Determine platform capabilities
         # Live Monitor relies on local log files, so disable on mobile
-        self._supports_live = page.platform not in [ft.PagePlatform.ANDROID, ft.PagePlatform.IOS]
+        self._supports_live = not self._is_mobile
         
         # Move LogWatcher start to async task to prevent init blocking
         self.page.run_task(self._init_services)
         
         # Check if data folder needs to be configured (first launch)
-        print("Checking data folder configuration...")
+        logger.info("Checking data folder configuration...")
         if not is_data_folder_configured():
-            print("Data folder not configured, showing setup...")
+            logger.info("Data folder not configured, showing setup...")
             # Show setup dialog - will call _on_data_folder_configured when done
             show_data_folder_setup(page, on_complete=self._on_data_folder_configured)
         else:
-            print("Data folder configured. Running startup tasks...")
             # Already configured, proceed with startup steps
             self.page.run_task(self._check_for_updates)
             self.page.run_task(self._check_existing_session)
-            print("Startup tasks scheduled.")
+            logger.debug("Startup tasks scheduled.")
     
     async def _init_services(self):
         """Initialize background services asynchronously"""
@@ -175,24 +202,31 @@ class GroupGuardianApp:
         
         self._watcher = None
         self._alert_service = None
+        self._instance_context = None
         
         if self._supports_live:
             try:
-                print("Starting LogWatcher (Async)...")
+                logger.info("Starting LogWatcher (Async)...")
                 # get_log_watcher might allow thread start, which is fast.
                 self._watcher = get_log_watcher(self._handle_global_log_event)
                 self._watcher.start()
-                print("LogWatcher started (Async).")
+                logger.info("LogWatcher started (Async).")
                 
                 # Initialize alert service (will set API client after login)
                 self._alert_service = get_alert_service()
-                print("WatchlistAlertService initialized.")
+                logger.info("WatchlistAlertService initialized.")
+                
+                # Initialize instance context service for moderation context awareness
+                self._instance_context = get_instance_context()
+                self._instance_context.attach_log_watcher(self._watcher)
+                self._instance_context.add_listener(self._on_instance_context_change)
+                logger.info("InstanceContextService initialized and attached to LogWatcher.")
                 
                 # Start background alert processing loop
                 self.page.run_task(self._process_alerts_loop)
                 
             except Exception as e:
-                print(f"Failed to start LogWatcher: {e}")
+                logger.error(f"Failed to start LogWatcher: {e}")
                 self._supports_live = False
     
     async def _process_alerts_loop(self):
@@ -237,6 +271,41 @@ class GroupGuardianApp:
         # Now proceed with startup steps
         self.page.run_task(self._check_for_updates)
         self.page.run_task(self._check_existing_session)
+    
+    def _on_instance_context_change(self, context):
+        """
+        Handle instance context changes from the InstanceContextService.
+        
+        This is called when:
+        - User enters/leaves an instance
+        - Instance is matched/unmatched against group instances
+        - Periodic refresh updates the context
+        
+        Use this to show/hide features based on moderation context.
+        """
+        from services.instance_context import InstanceContextState
+        
+        state = context.state
+        instance = context.current_instance
+        group = context.matching_group
+        
+        # Determine if we have live data (in any instance)
+        has_live_data = state != InstanceContextState.OFFLINE
+        
+        # Update GroupSelectionView live button visibility if on that screen
+        if self._group_selection_view and self._current_route == "/groups":
+            self._group_selection_view.set_has_live_data(has_live_data)
+        
+        if state == InstanceContextState.IN_GROUP_INSTANCE:
+            logger.info(f"🎯 Moderation context: IN GROUP INSTANCE")
+            logger.info(f"   Group: {group.get('name') if group else 'Unknown'}")
+            logger.info(f"   World: {instance.world_id if instance else 'Unknown'}")
+            logger.info(f"   Features available: {context.available_features}")
+        elif state == InstanceContextState.IN_UNTRACKED:
+            logger.info(f"📍 Moderation context: IN UNTRACKED INSTANCE")
+            logger.info(f"   Location: {instance.location if instance else 'Unknown'}")
+        else:
+            logger.info(f"📴 Moderation context: OFFLINE")
     
     async def _check_existing_session(self):
         """Check if we have a valid saved session"""
@@ -296,12 +365,12 @@ class GroupGuardianApp:
                     except Exception as e:
                         logger.debug(f"Could not update title bar live: {e}")
                 
-                self.page.update()
+                # Title bar update already calls its own update internally
         except Exception as e:
             logger.error(f"Update check failed: {e}")
     
     def _create_view_with_titlebar(self, content: ft.Control, keep_view_ref=None) -> ft.View:
-        """Create a view with custom title bar"""
+        """Create a view with custom title bar (desktop only, mobile uses system chrome)"""
         # If content is already a View, extract its controls
         if isinstance(content, ft.View):
             inner_controls = content.controls if content.controls else []
@@ -318,8 +387,17 @@ class GroupGuardianApp:
         route = "/"
         if isinstance(content, ft.View) and content.route:
             route = content.route
+        
+        # On mobile, skip the title bar (use system chrome)
+        if self._is_mobile:
+            return ft.View(
+                route,
+                controls=[inner_content],
+                padding=0,
+                bgcolor=colors.bg_deepest,
+            )
             
-        # Create TitleBar with update info if available
+        # Desktop: Create TitleBar with update info if available
         title_bar = TitleBar(title="Group Guardian", icon_path=self._icon_path)
         if self._update_available and self._update_info:
             version, url, notes = self._update_info
@@ -371,10 +449,12 @@ class GroupGuardianApp:
     
     def _show_login(self):
         """Show login view"""
+        fd.log_view_rebuild("LoginView", "_show_login called")
         self.page.views.clear()
         
         # Check for stored credentials for autofill
         saved_user, saved_pass = self._load_credentials()
+        fd.log_info(f"_show_login: Creating LoginView (has_saved_creds={bool(saved_user)})")
         
         self._login_view = LoginView(
             on_login=self._handle_login,
@@ -389,10 +469,14 @@ class GroupGuardianApp:
         # Wrap with title bar
         view = self._create_view_with_titlebar(self._login_view)
         self.page.views.append(view)
+        fd.log_page_update("_show_login", "After appending view")
         self.page.update()
         
         # Manually set page reference since we extracted controls from the View
         self._login_view.page = self.page
+        fd.log_info("_show_login: Calling did_mount()")
+        self._login_view.did_mount()
+        fd.log_info("_show_login: Complete")
     
     async def _do_login_sequence(self, username, password) -> dict:
         """Execute login logic, returns result dict"""
@@ -405,7 +489,7 @@ class GroupGuardianApp:
                      self._show_login()
                 
                 tfa_type = result.get("2fa_type", "emailOtp")
-                print(f"2FA required: {tfa_type}")
+                logger.info(f"2FA required: {tfa_type}")
                 if self._login_view:
                     self._login_view.show_2fa_required(tfa_type)
             else:
@@ -419,7 +503,7 @@ class GroupGuardianApp:
     def _handle_login(self, username: str, password: str, remember_me: bool = False):
         """Handle login attempt with real VRChat API"""
         self._username = username
-        print(f"Login attempt: {username}, Remember: {remember_me}")
+        logger.debug(f"Login attempt: {username}, Remember: {remember_me}")
         
         if remember_me:
             self._save_credentials(username, password)
@@ -427,13 +511,20 @@ class GroupGuardianApp:
             self._clear_credentials()
         
         async def do_login():
-            result = await self._do_login_sequence(username, password)
-            
-            if not result.get("success"):
-                error = result.get("error", "Login failed")
-                print(f"Login failed: {error}")
+            try:
+                result = await self._do_login_sequence(username, password)
+                
+                if not result.get("success"):
+                    error = result.get("error", "Login failed")
+                    logger.warning(f"Login failed: {error}")
+                    if self._login_view:
+                        self._login_view.show_login_error(error)
+            except Exception as e:
+                logger.error(f"Unexpected login error: {e}")
+                import traceback
+                logger.debug(traceback.format_exc())
                 if self._login_view:
-                    self._login_view.show_login_error(error)
+                    self._login_view.show_login_error(f"An unexpected error occurred: {str(e)}")
 
         self.page.run_task(do_login)
 
@@ -445,7 +536,7 @@ class GroupGuardianApp:
             with open("storage.json", "w") as f:
                 json.dump({"auth": b64_data}, f)
         except Exception as e:
-            print(f"Failed to save credentials: {e}")
+            logger.warning(f"Failed to save credentials: {e}")
 
     def _load_credentials(self):
         """Load stored credentials"""
@@ -461,7 +552,7 @@ class GroupGuardianApp:
                     return decoded.split(":", 1)
             return None, None
         except Exception as e:
-            print(f"Failed to load credentials: {e}")
+            logger.warning(f"Failed to load credentials: {e}")
             return None, None
             
     def _clear_credentials(self):
@@ -474,7 +565,7 @@ class GroupGuardianApp:
     
     def _handle_2fa_verify(self, code: str):
         """Handle 2FA code verification"""
-        print(f"Verifying 2FA code: {code}")
+        logger.debug(f"Verifying 2FA code: {code[:2]}***")
         
         async def do_verify():
             result = await self._api.verify_2fa(code)
@@ -483,11 +574,11 @@ class GroupGuardianApp:
                 user = result.get("user", {})
                 self._username = user.get("displayName", self._username)
                 self._current_user = user
-                print(f"2FA verified! Logged in as: {self._username}")
+                logger.info(f"2FA verified! Logged in as: {self._username}")
                 self._handle_login_success()
             else:
                 error = result.get("error", "Invalid code")
-                print(f"2FA verification failed: {error}")
+                logger.warning(f"2FA verification failed: {error}")
                 if self._login_view:
                     self._login_view.show_2fa_error(error)
         
@@ -504,6 +595,12 @@ class GroupGuardianApp:
         if self._alert_service:
             self._alert_service.set_api(self._api)
             logger.info("WatchlistAlertService connected to API")
+        
+        # Connect instance context service to authenticated API and start it
+        if self._instance_context:
+            self._instance_context.set_api(self._api)
+            self.page.run_task(self._instance_context.start)
+            logger.info("InstanceContextService connected to API and started")
         
         if self._current_user:
             self._show_welcome(self._current_user)
@@ -596,14 +693,14 @@ class GroupGuardianApp:
         # Strict wait for cinematic feel
         await asyncio.sleep(3.5)
         
-        print(f"Transitioning... Found {len(self._groups)} groups")
+        logger.info(f"Transitioning... Found {len(self._groups)} groups")
         
         # Auto-select if only 1 group
         if len(self._groups) == 1:
-            print("Single group detected, skipping selection.")
+            logger.debug("Single group detected, skipping selection.")
             self._handle_group_select(self._groups[0])
         else:
-            print("Transitioning to group selection...")
+            logger.debug("Transitioning to group selection...")
             self._show_group_selection()
         
     async def _load_user_assets(self):
@@ -623,7 +720,7 @@ class GroupGuardianApp:
 
     async def _start_demo_mode(self, e=None):
         """Start demo mode with mock API"""
-        print("Starting Demo Mode...")
+        logger.info("Starting Demo Mode...")
         self._api = MockVRChatAPI()
         
         # Verify mock login
@@ -640,14 +737,20 @@ class GroupGuardianApp:
              self._show_welcome(self._current_user)
              
         except Exception as ex:
-            print(f"Demo failed: {ex}")
+            logger.error(f"Demo failed: {ex}")
             import traceback
-            traceback.print_exc()
+            logger.exception("Demo mode exception")
             
     
     def _show_group_selection(self):
         """Show group selection view"""
         self.page.views.clear()
+        
+        # Check if we have active live log data
+        has_live_data = False
+        if self._instance_context:
+            has_live_data = self._instance_context.has_live_data()
+        
         self._group_selection_view = GroupSelectionView(
             groups=self._groups,  # Use currently known groups
             on_group_select=self._handle_group_select,
@@ -659,6 +762,8 @@ class GroupGuardianApp:
             user_data=self._current_user,
             current_group_id=self._watcher.current_group_id if(self._watcher and self._supports_live) else None,
             supports_live=self._supports_live,
+            has_live_data=has_live_data,
+            is_mobile=self._is_mobile,
         )
         view = self._create_view_with_titlebar(self._group_selection_view)
         self.page.views.append(view)
@@ -667,9 +772,8 @@ class GroupGuardianApp:
         # Manually set page reference since we extracted controls from the View
         self._group_selection_view.page = self.page
         
-        # Fetch groups async if empty
         if not self._groups:
-             print("Groups empty or not loaded, triggering fetch...")
+             logger.debug("Groups empty or not loaded, triggering fetch...")
              self.page.run_task(self._load_groups, force_refresh=True)
     
     async def _handle_refresh_groups(self, e=None):
@@ -679,18 +783,18 @@ class GroupGuardianApp:
     async def _load_groups(self, force_refresh: bool = False):
         """Load user's groups with mod permissions"""
         if self._loading_groups_lock:
-            print("Group load already in progress...")
+            logger.debug("Group load already in progress...")
             return
 
         self._loading_groups_lock = True
         try:
             if self._groups and not force_refresh:
-                print("Using cached groups")
+                logger.debug("Using cached groups")
                 if self._group_selection_view:
                      self._group_selection_view.set_groups(self._groups)
                 return
 
-            print("Loading groups...")
+            logger.info("Loading groups...")
             if self._group_selection_view:
                 self._group_selection_view.set_loading(True)
             
@@ -700,7 +804,7 @@ class GroupGuardianApp:
                 await asyncio.sleep(0.8)
                 
             groups = await self._api.get_my_groups(force_refresh=force_refresh)
-            print(f"Found {len(groups)} groups with mod permissions")
+            logger.info(f"Found {len(groups)} groups with mod permissions")
             
             # Cache group images locally (VRChat URLs require auth cookies)
             import asyncio
@@ -710,12 +814,18 @@ class GroupGuardianApp:
             
             self._groups = groups
             
+            # Update instance context service with the groups list
+            if self._instance_context:
+                self._instance_context.set_groups(groups)
+                # Trigger a refresh of group instances to match against current location
+                self.page.run_task(self._instance_context.refresh_group_instances)
+            
             if self._group_selection_view:
                 self._group_selection_view.set_groups(groups)
                 self._group_selection_view.set_loading(False)
                 
         except Exception as e:
-            print(f"Error loading groups: {e}")
+            logger.error(f"Error loading groups: {e}")
             if self._group_selection_view:
                  self._group_selection_view.set_loading(False)
         finally:
@@ -724,7 +834,7 @@ class GroupGuardianApp:
     def _handle_group_select(self, group: dict):
         """Handle group selection"""
         self._current_group = group
-        print(f"Selected group: {group.get('name')} ({group.get('id')})")
+        logger.info(f"Selected group: {group.get('name')} ({group.get('id')})")
         
         # Update window title
         self.page.title = f"Group Guardian - {group.get('name')}"
@@ -743,6 +853,9 @@ class GroupGuardianApp:
             try:
                 await self._api.logout()
                 
+                # Clear all entity caches to prevent stale data on re-login
+                self._api.clear_all_caches()
+                
                 # Reset to real API client (exits Demo Mode)
                 self._api = VRChatAPI()
                 
@@ -750,19 +863,44 @@ class GroupGuardianApp:
                 self._current_group = None
                 self._groups = []
                 self._username = ""
+                self._current_user = {}  # Clear user object to ensure fresh state
                 self._welcome_view = None # Clear stale view reference
                 self._live_view = None # Clear stale live view reference
                 
                 # Disconnect alert service from old API
                 if self._alert_service:
                     self._alert_service.set_api(None)
+                
+                # Stop and disconnect instance context service
+                if self._instance_context:
+                    await self._instance_context.stop()
+                    self._instance_context.set_api(None)
+                    self._instance_context.set_groups([])
                     
-                print("Logged out")
+                logger.info("Logged out")
                 self.page.go("/login")
             finally:
                 self._logout_in_progress = False
         
         self.page.run_task(do_logout)
+    
+    def _on_window_resized(self, e):
+        """Handle window resize for responsive layout"""
+        if not self.page or not self._sidebar:
+            return
+        
+        # Get current window width
+        width = self.page.window.width or 1280
+        
+        # Collapse sidebar on narrow windows (< 1100px)
+        # Expand on wider windows (> 1200px)
+        # Update persistent state so it survives navigation
+        if width < 1100:
+            self._sidebar.set_collapsed(True)
+            self._sidebar_collapsed = True
+        elif width > 1200:
+            self._sidebar.set_collapsed(False)
+            self._sidebar_collapsed = False
     
     def _on_route_change(self, e: ft.RouteChangeEvent):
         """Handle route changes"""
@@ -782,11 +920,19 @@ class GroupGuardianApp:
             return
         
         if route == "/live":
+            # Check if we have live data before allowing access to live view
+            has_live_data = self._instance_context.has_live_data() if self._instance_context else False
+            if not self._supports_live or not has_live_data:
+                # No live data available, redirect to groups
+                logger.info("Attempted to access /live without live log data - redirecting to /groups")
+                self.page.go("/groups")
+                return
+            
             # Allow live view without group selection, but use main view layout
-             self.page.views.clear()
-             self.page.views.append(self._build_main_view(route))
-             self.page.update()
-             return
+            self.page.views.clear()
+            self.page.views.append(self._build_main_view(route))
+            self.page.update()
+            return
 
         if route == "/settings":
             # Allow settings without group selection
@@ -806,9 +952,96 @@ class GroupGuardianApp:
         self.page.update()
     
     def _build_main_view(self, route: str) -> ft.View:
-        """Build main app view with sidebar and content"""
+        """Build main app view with sidebar (desktop) or bottom nav (mobile)"""
         
-        # Sidebar with group name and user data
+        # Content area
+        content = self._get_content_for_route(route)
+        
+        # Check if running on mobile
+        if self._is_mobile:
+            return self._build_mobile_main_view(route, content)
+        else:
+            return self._build_desktop_main_view(route, content)
+    
+    def _build_mobile_main_view(self, route: str, content: ft.Control) -> ft.View:
+        """Build mobile-optimized main view with bottom navigation"""
+        from ui.components.bottom_nav import BottomNavBar
+        
+        # Mobile header - simplified
+        mobile_header = ft.Container(
+            content=ft.Row(
+                controls=[
+                    # Group icon or app icon
+                    ft.Container(
+                        content=ft.Image(
+                            src=self._current_group.get("iconUrl", "") if self._current_group and self._current_group.get("iconUrl") else self._icon_path,
+                            fit=ft.ImageFit.COVER,
+                            width=32,
+                            height=32,
+                            border_radius=radius.sm,
+                        ),
+                        width=36,
+                        height=36,
+                        border_radius=radius.sm,
+                        bgcolor=colors.bg_elevated,
+                        alignment=ft.alignment.center,
+                    ),
+                    ft.Container(width=spacing.sm),
+                    # Group/App name
+                    ft.Text(
+                        self._current_group.get("name", "Group Guardian") if self._current_group else "Group Guardian",
+                        size=typography.size_lg,
+                        weight=ft.FontWeight.W_600,
+                        color=colors.text_primary,
+                        expand=True,
+                        no_wrap=True,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    # Back button
+                    ft.IconButton(
+                        icon=ft.Icons.ARROW_BACK_ROUNDED,
+                        icon_color=colors.text_secondary,
+                        icon_size=24,
+                        tooltip="Back to Groups",
+                        on_click=lambda e: self.page.go("/groups"),
+                    ),
+                ],
+            ),
+            padding=ft.padding.symmetric(horizontal=spacing.md, vertical=spacing.sm),
+            bgcolor=colors.bg_base,
+            border=ft.border.only(bottom=ft.BorderSide(1, colors.glass_border)),
+        )
+        
+        # Bottom navigation
+        bottom_nav = BottomNavBar(
+            on_navigate=self._navigate,
+            current_route=route,
+            badge_counts={"/requests": self._pending_requests_count},
+        )
+        
+        # Main layout: Header + Content + Bottom Nav
+        full_layout = ft.Column(
+            controls=[
+                mobile_header,
+                ft.Container(
+                    content=SimpleGradientBackground(content=content),
+                    expand=True,
+                ),
+                bottom_nav,
+            ],
+            spacing=0,
+            expand=True,
+        )
+        
+        return ft.View(
+            route=route,
+            padding=0,
+            bgcolor=colors.bg_deepest,
+            controls=[full_layout],
+        )
+    
+    def _build_desktop_main_view(self, route: str, content: ft.Control) -> ft.View:
+        """Build desktop main view with sidebar navigation"""
         
         # Determine nav items based on route context
         custom_nav = None
@@ -821,15 +1054,14 @@ class GroupGuardianApp:
         self._sidebar = Sidebar(
             on_navigate=self._navigate,
             on_logout=self._handle_logout,
+            on_toggle=self._handle_sidebar_toggle,
             current_route=route,
+            collapsed=self._sidebar_collapsed,
             user_name=self._username or "User",
             user_data=self._current_user,  # Pass full user data for avatar and status
             badge_counts={"/requests": self._pending_requests_count},
             nav_items=custom_nav
         )
-        
-        # Content area
-        content = self._get_content_for_route(route)
         
         # Group header bar (Only if group selected)
         if self._current_group:
@@ -955,6 +1187,15 @@ class GroupGuardianApp:
             if self._sidebar:
                 self._sidebar.set_badge("/requests", self._pending_requests_count)
     
+    def _handle_theme_change(self, new_color: str):
+        """Handle theme color change from settings - refresh sidebar immediately"""
+        if self._sidebar:
+            self._sidebar.refresh_theme()
+            
+    def _handle_sidebar_toggle(self, collapsed: bool):
+        """Handle sidebar toggle from UI"""
+        self._sidebar_collapsed = collapsed
+    
     def _get_content_for_route(self, route: str) -> ft.Control:
         """Get content control for a route"""
         
@@ -974,14 +1215,16 @@ class GroupGuardianApp:
                 group=self._current_group,
                 api=self._api,
                 on_navigate=self._navigate,
-                on_update_stats=self._handle_stats_update
+                on_update_stats=self._handle_stats_update,
+                is_mobile=self._is_mobile
             )
         
         elif route == "/instances":
             return InstancesView(
                 group=self._current_group,
                 api=self._api,
-                on_navigate=self._navigate
+                on_navigate=self._navigate,
+                is_mobile=self._is_mobile
             )
         
         elif route == "/requests":
@@ -989,7 +1232,8 @@ class GroupGuardianApp:
                 group=self._current_group,
                 api=self._api,
                 on_navigate=self._navigate,
-                on_update_stats=self._handle_stats_update
+                on_update_stats=self._handle_stats_update,
+                is_mobile=self._is_mobile
             )
         
         elif route == "/members":
@@ -1022,7 +1266,7 @@ class GroupGuardianApp:
             return self._placeholder_view("Audit Logs", "View moderation activity history")
         
         elif route == "/settings":
-            return SettingsView(on_navigate=self._navigate, api=self._api)
+            return SettingsView(on_navigate=self._navigate, api=self._api, on_theme_change=self._handle_theme_change)
         
         else:
             return DashboardView()
@@ -1090,13 +1334,14 @@ def main(page: ft.Page):
     try:
         UpdateService.handle_update_process()
     except Exception as e:
-        print(f"Update service init error: {e}")
+        logger.error(f"Update service init error: {e}")
     
     try:
         GroupGuardianApp(page)
     except Exception as e:
         import traceback
-        traceback.print_exc()
+        logger.critical(f"Critical error during startup: {e}")
+        logger.exception("Startup exception")
         page.clean()
         page.add(
             ft.Column([
@@ -1108,5 +1353,6 @@ def main(page: ft.Page):
         page.update()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__" or __name__ == "main":
+    logger.info(f"Starting app with __name__='{__name__}'")
     ft.app(target=main)

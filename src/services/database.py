@@ -17,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from utils.paths import get_database_path
+from services.event_bus import get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,34 @@ class DatabaseService:
                 )
             """)
             
+            # Group Settings table - per-group configuration (e.g., auto-close non-age-verified instances)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS group_settings (
+                    group_id TEXT PRIMARY KEY,
+                    group_name TEXT,
+                    auto_close_non_age_verified BOOLEAN DEFAULT 0,
+                    automod_enabled BOOLEAN DEFAULT 0,
+                    automod_age_verified_only BOOLEAN DEFAULT 0,
+                    automod_require_keywords TEXT DEFAULT '[]',
+                    automod_exclude_keywords TEXT DEFAULT '[]',
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+            """)
+            
+            # Auto-Mod Logs - track automatic approvals/rejections
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS automod_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    group_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    username TEXT,
+                    action TEXT,
+                    reason TEXT
+                )
+            """)
+            
             # Seed default tags if table is empty
             self._seed_default_tags(conn)
             
@@ -141,31 +170,18 @@ class DatabaseService:
     def _seed_default_tags(self, conn):
         """Seed default watchlist tags if not already present"""
         from datetime import datetime
+        from services.watchlist_alerts import DEFAULT_TAGS
         now = datetime.now().isoformat()
         
-        default_tags = [
-            ("Crasher", "🚨", "#FF4444", "Known to crash sessions", 1),
-            ("Predator", "⚠️", "#FF0000", "Dangerous individual", 1),
-            ("Zoophile", "🚫", "#880000", "Known zoophile", 1),
-            ("Suspicious", "👀", "#FF9800", "Suspicious behavior", 1),
-            ("Bad Vibes", "💀", "#9C27B0", "Generally unpleasant", 1),
-            ("VIP", "⭐", "#FFD700", "Very important person", 1),
-            ("Friend", "💚", "#4CAF50", "Trusted friend", 1),
-            ("Mute Evader", "🔇", "#607D8B", "Uses alts to evade mutes", 1),
-            ("Bot/Alt", "🤖", "#795548", "Bot or alternate account", 1),
-            ("Harassment", "📛", "#E91E63", "Known harasser", 1),
-            ("Ripper", "🏴‍☠️", "#673AB7", "Rips avatars/worlds", 1),
-            ("Leaker", "💧", "#03A9F4", "Leaks private content", 1),
-        ]
-        
-        for name, emoji, color, desc, is_default in default_tags:
+        # Use centralized tag definitions from watchlist_alerts
+        for tag in DEFAULT_TAGS:
             try:
                 conn.execute("""
                     INSERT OR IGNORE INTO custom_tags (name, emoji, color, description, is_default, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (name, emoji, color, desc, is_default, now))
+                    VALUES (?, ?, ?, ?, 1, ?)
+                """, (tag["name"], tag["emoji"], tag["color"], tag.get("description", ""), now))
             except Exception as e:
-                logger.debug(f"Tag {name} already exists or error: {e}")
+                logger.debug(f"Tag {tag['name']} already exists or error: {e}")
     
     def _migrate_schema(self, conn):
         """Add new columns to existing tables if they don't exist"""
@@ -199,6 +215,27 @@ class DatabaseService:
                 logger.info("Renamed username to current_username")
             except:
                 pass
+
+        # Group Settings table migrations
+        cursor = conn.execute("PRAGMA table_info(group_settings)")
+        existing_group_cols = {row[1] for row in cursor.fetchall()}
+        
+        new_group_columns = [
+            ("automod_enabled", "BOOLEAN DEFAULT 0"),
+            ("automod_age_verified_only", "BOOLEAN DEFAULT 0"),
+            ("automod_require_keywords", "TEXT DEFAULT '[]'"),
+            ("automod_exclude_keywords", "TEXT DEFAULT '[]'"),
+            ("automod_min_trust_rank", "INTEGER DEFAULT 0"),
+            ("automod_min_account_age_days", "INTEGER DEFAULT 0"),
+        ]
+        
+        for col_name, col_type in new_group_columns:
+            if col_name not in existing_group_cols:
+                try:
+                    conn.execute(f"ALTER TABLE group_settings ADD COLUMN {col_name} {col_type}")
+                    logger.info(f"Added column to group_settings: {col_name}")
+                except:
+                    pass
 
 
     # --- User Profile Management ---
@@ -254,6 +291,10 @@ class DatabaseService:
                 """, (user_id, username, now, now))
             
             conn.commit()
+            
+            # Emit update
+            get_event_bus().emit("user_updated", {"user_id": user_id})
+            
             return self.get_user_profile(user_id)
         finally:
             conn.close()
@@ -341,6 +382,7 @@ class DatabaseService:
         try:
             conn.execute("UPDATE users SET note = ? WHERE user_id = ?", (note, user_id))
             conn.commit()
+            get_event_bus().emit("user_updated", {"user_id": user_id})
         finally:
             conn.close()
 
@@ -350,6 +392,8 @@ class DatabaseService:
         try:
             conn.execute("UPDATE users SET is_watchlisted = ? WHERE user_id = ?", (1 if state else 0, user_id))
             conn.commit()
+            get_event_bus().emit("user_updated", {"user_id": user_id})
+            get_event_bus().emit("watchlist_updated", {"user_id": user_id, "state": state})
         finally:
             conn.close()
 
@@ -359,6 +403,7 @@ class DatabaseService:
         try:
             conn.execute("UPDATE users SET is_favorite = ? WHERE user_id = ?", (1 if state else 0, user_id))
             conn.commit()
+            get_event_bus().emit("user_updated", {"user_id": user_id})
         finally:
             conn.close()
 
@@ -374,6 +419,7 @@ class DatabaseService:
                     tags.append(tag)
                     conn.execute("UPDATE users SET tags = ? WHERE user_id = ?", (json.dumps(tags), user_id))
                     conn.commit()
+                    get_event_bus().emit("user_updated", {"user_id": user_id})
         finally:
             conn.close()
 
@@ -389,6 +435,7 @@ class DatabaseService:
                     tags.remove(tag)
                     conn.execute("UPDATE users SET tags = ? WHERE user_id = ?", (json.dumps(tags), user_id))
                     conn.commit()
+                    get_event_bus().emit("user_updated", {"user_id": user_id})
         finally:
             conn.close()
 
@@ -531,6 +578,133 @@ class DatabaseService:
                 VALUES (?, ?, ?, ?)
             """, (timestamp, user_id, username, avatar_name))
             conn.commit()
+        finally:
+            conn.close()
+
+    
+    def get_group_settings(self, group_id: str) -> Optional[dict]:
+        """Get settings for a specific group"""
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                "SELECT * FROM group_settings WHERE group_id = ?", 
+                (group_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                data = dict(row)
+                # Parse JSON fields
+                data['automod_require_keywords'] = json.loads(data.get('automod_require_keywords') or '[]')
+                data['automod_exclude_keywords'] = json.loads(data.get('automod_exclude_keywords') or '[]')
+                return data
+            return None
+        finally:
+            conn.close()
+    
+    def set_group_auto_close_non_age_verified(self, group_id: str, group_name: str, enabled: bool):
+        """Set whether to auto-close non-age-verified instances for a group"""
+        conn = self._get_conn()
+        try:
+            now = datetime.now().isoformat()
+            # Upsert - insert or update
+            conn.execute("""
+                INSERT INTO group_settings (group_id, group_name, auto_close_non_age_verified, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(group_id) DO UPDATE SET
+                    group_name = excluded.group_name,
+                    auto_close_non_age_verified = excluded.auto_close_non_age_verified,
+                    updated_at = excluded.updated_at
+            """, (group_id, group_name, 1 if enabled else 0, now, now))
+            conn.commit()
+            logger.info(f"Set auto_close_non_age_verified={enabled} for group {group_name} ({group_id})")
+            get_event_bus().emit("group_settings_updated", {
+                "group_id": group_id, 
+                "auto_close_non_age_verified": enabled
+            })
+        finally:
+            conn.close()
+    
+    def get_groups_with_auto_close_enabled(self) -> List[str]:
+        """Get list of group IDs that have auto-close non-age-verified enabled"""
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute(
+                "SELECT group_id FROM group_settings WHERE auto_close_non_age_verified = 1"
+            )
+            return [row['group_id'] for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def set_group_automod_settings(self, group_id: str, group_name: str, enabled: bool, 
+                                 age_verified_only: bool, require_keywords: list, exclude_keywords: list,
+                                 min_trust_rank: int = 0, min_account_age_days: int = 0):
+        """Update auto-moderation settings for a group"""
+        conn = self._get_conn()
+        try:
+            now = datetime.now().isoformat()
+            require_json = json.dumps(require_keywords)
+            exclude_json = json.dumps(exclude_keywords)
+            
+            conn.execute("""
+                INSERT INTO group_settings (
+                    group_id, group_name, 
+                    automod_enabled, automod_age_verified_only, 
+                    automod_require_keywords, automod_exclude_keywords,
+                    automod_min_trust_rank, automod_min_account_age_days,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(group_id) DO UPDATE SET
+                    group_name = excluded.group_name,
+                    automod_enabled = excluded.automod_enabled,
+                    automod_age_verified_only = excluded.automod_age_verified_only,
+                    automod_require_keywords = excluded.automod_require_keywords,
+                    automod_exclude_keywords = excluded.automod_exclude_keywords,
+                    automod_min_trust_rank = excluded.automod_min_trust_rank,
+                    automod_min_account_age_days = excluded.automod_min_account_age_days,
+                    updated_at = excluded.updated_at
+            """, (
+                group_id, group_name, 
+                1 if enabled else 0, 1 if age_verified_only else 0,
+                require_json, exclude_json,
+                min_trust_rank, min_account_age_days,
+                now, now
+            ))
+            conn.commit()
+            
+            logger.info(f"Saved automod settings for {group_name}: enabled={enabled}, age={age_verified_only}, trust={min_trust_rank}, days={min_account_age_days}")
+            
+            get_event_bus().emit("group_settings_updated", {
+                "group_id": group_id,
+                "automod_enabled": enabled
+            })
+        finally:
+            conn.close()
+
+    def log_automod_action(self, group_id: str, user_id: str, username: str, action: str, reason: str):
+        """Log an auto-moderation action"""
+        conn = self._get_conn()
+        try:
+            now = datetime.now().isoformat()
+            conn.execute("""
+                INSERT INTO automod_logs (timestamp, group_id, user_id, username, action, reason)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (now, group_id, user_id, username, action, reason))
+            conn.commit()
+        finally:
+            conn.close()
+            
+    def get_automod_logs(self, group_id: str, limit: int = 50) -> List[dict]:
+        """Get auto-moderation logs for a group"""
+        conn = self._get_conn()
+        try:
+            cursor = conn.execute("""
+                SELECT * FROM automod_logs 
+                WHERE group_id = ? 
+                ORDER BY timestamp DESC 
+                LIMIT ?
+            """, (group_id, limit))
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
