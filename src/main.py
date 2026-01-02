@@ -529,34 +529,21 @@ class GroupGuardianApp:
         self.page.run_task(do_login)
 
     def _save_credentials(self, username, password):
-        """Save credentials to local file (simple encoding)"""
-        try:
-            data = f"{username}:{password}".encode("utf-8")
-            b64_data = base64.b64encode(data).decode("utf-8")
-            with open("storage.json", "w") as f:
-                json.dump({"auth": b64_data}, f)
-        except Exception as e:
-            logger.warning(f"Failed to save credentials: {e}")
+        """Save credentials securely to OS keyring"""
+        from utils.crypto import SecureStorage
+        SecureStorage.save_credentials(username, password)
 
     def _load_credentials(self):
-        """Load stored credentials"""
-        try:
-            if not os.path.exists("storage.json"):
-                return None, None
-            with open("storage.json", "r") as f:
-                data = json.load(f)
-            
-            if "auth" in data:
-                decoded = base64.b64decode(data["auth"]).decode("utf-8")
-                if ":" in decoded:
-                    return decoded.split(":", 1)
-            return None, None
-        except Exception as e:
-            logger.warning(f"Failed to load credentials: {e}")
-            return None, None
+        """Load stored credentials from OS keyring"""
+        from utils.crypto import SecureStorage
+        return SecureStorage.get_credentials()
             
     def _clear_credentials(self):
-        """Clear stored credentials"""
+        """Clear stored credentials from OS keyring"""
+        from utils.crypto import SecureStorage
+        SecureStorage.clear_credentials()
+        
+        # Cleanup old insecure storage if it exists
         if os.path.exists("storage.json"):
             try:
                 os.remove("storage.json")
@@ -934,8 +921,8 @@ class GroupGuardianApp:
             self.page.update()
             return
 
-        if route == "/settings":
-            # Allow settings without group selection
+        if route == "/settings" or route == "/database":
+            # Allow settings/database without group selection
             self.page.views.clear()
             self.page.views.append(self._build_main_view(route))
             self.page.update()
@@ -1264,6 +1251,16 @@ class GroupGuardianApp:
         
         elif route == "/logs":
             return self._placeholder_view("Audit Logs", "View moderation activity history")
+
+        elif route == "/database":
+            try:
+                from ui.views.database import DatabaseView
+                return DatabaseView(api=self._api, on_navigate=self._navigate)
+            except Exception as e:
+                logger.error(f"Failed to load DatabaseView: {e}")
+                import traceback
+                traceback.print_exc()
+                return self._placeholder_view("Error Loading View", f"Failed to initialize Database Inspector: {e}")
         
         elif route == "/settings":
             return SettingsView(on_navigate=self._navigate, api=self._api, on_theme_change=self._handle_theme_change)
@@ -1354,5 +1351,12 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__" or __name__ == "main":
-    logger.info(f"Starting app with __name__='{__name__}'")
-    ft.app(target=main)
+    print("DEBUG: Entered main block")
+    try:
+        logger.info(f"Starting app with __name__='{__name__}'")
+        print("DEBUG: Calling ft.app")
+        ft.app(target=main)
+    except Exception as e:
+        print(f"DEBUG: Error launching app: {e}")
+        logger.exception("Failed to launch app")
+        input("Press Enter to exit...")

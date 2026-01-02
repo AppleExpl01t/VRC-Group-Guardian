@@ -245,7 +245,7 @@ class AutoModService:
                         # Log to DB
                         self.db.log_automod_action(group_id, user_id, display_name, action, reason)
                         processed_user_ids.append(user_id)
-                        logger.info(f"Auto-Mod action completed: {action} for {display_name}")
+                        logger.info(f"Auto-Mod action logged to DB: {action} for {display_name}")
                         
                         # Play notification sound
                         notif_service = get_notification_service()

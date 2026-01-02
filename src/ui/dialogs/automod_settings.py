@@ -111,7 +111,7 @@ class AutoModSettingsDialog(ft.AlertDialog):
         )
         
         # Logs Section
-        logs = self.db.get_automod_logs(self.group_id, limit=10)
+        logs = self.db.get_automod_logs(self.group_id, limit=50)
         watchlist_svc = get_watchlist_service()
         log_rows = []
         if logs:

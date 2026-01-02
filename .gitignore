@@ -21,3 +21,5 @@
 !adb_log.txt
 !adb_error.txt
 !traceback.txt
+!data/logs/
+!data/logs/**

@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from utils.paths import get_database_path
 from services.event_bus import get_event_bus
+from utils.crypto import get_integrity_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ class DatabaseService:
                     total_time_together INTEGER DEFAULT 0,
                     custom_sound_path TEXT,
                     custom_color TEXT,
-                    tags TEXT DEFAULT '[]'
+                    custom_sound_path TEXT,
+                    custom_color TEXT,
+                    tags TEXT DEFAULT '[]',
+                    integrity_hash TEXT
                 )
             """)
             
@@ -76,7 +80,9 @@ class DatabaseService:
                     world_id TEXT,
                     instance_id TEXT,
                     location TEXT,
+                    location TEXT,
                     leave_timestamp TEXT,
+                    integrity_hash TEXT,
                     FOREIGN KEY (user_id) REFERENCES users(user_id)
                 )
             """)
@@ -197,7 +203,9 @@ class DatabaseService:
             ("total_time_together", "INTEGER DEFAULT 0"),
             ("custom_sound_path", "TEXT"),
             ("custom_color", "TEXT"),
+            ("custom_color", "TEXT"),
             ("tags", "TEXT DEFAULT '[]'"),
+            ("integrity_hash", "TEXT"),
         ]
         
         for col_name, col_type in new_columns:
@@ -237,6 +245,24 @@ class DatabaseService:
                 except:
                     pass
 
+        # Ensure automod_logs table exists (double check for existing databases)
+        # This handles cases where _init_db might have skipped it in earlier versions
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS automod_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    group_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    username TEXT,
+                    action TEXT,
+                    reason TEXT
+                )
+            """)
+        except Exception as e:
+            logger.debug(f"Failed to ensure automod_logs table in migrate: {e}")
+
+
 
     # --- User Profile Management ---
 
@@ -273,22 +299,40 @@ class DatabaseService:
                     # This handles the case where we see them with a new name
                     pass  # New name becomes current, old becomes known
                 
+                # Calculate hash for update
+                new_sightings = existing['sightings_count'] + 1
+                first_seen = existing['first_seen']
+                
+                integrity = get_integrity_service().generate_hash({
+                    "user_id": user_id,
+                    "sightings_count": new_sightings,
+                    "first_seen": first_seen
+                }, ["user_id", "sightings_count", "first_seen"])
+                
                 conn.execute("""
                     UPDATE users SET
                         current_username = ?,
                         known_usernames = ?,
                         sightings_count = sightings_count + 1,
-                        last_seen = ?
+                        last_seen = ?,
+                        integrity_hash = ?
                     WHERE user_id = ?
-                """, (username, json.dumps(known_names), now, user_id))
+                """, (username, json.dumps(known_names), now, integrity, user_id))
             else:
                 # Create new user
+                # Calculate initial hash
+                integrity = get_integrity_service().generate_hash({
+                    "user_id": user_id,
+                    "sightings_count": 1,
+                    "first_seen": now
+                }, ["user_id", "sightings_count", "first_seen"])
+                
                 conn.execute("""
                     INSERT INTO users (
                         user_id, current_username, known_usernames,
-                        sightings_count, first_seen, last_seen
-                    ) VALUES (?, ?, '[]', 1, ?, ?)
-                """, (user_id, username, now, now))
+                        sightings_count, first_seen, last_seen, integrity_hash
+                    ) VALUES (?, ?, '[]', 1, ?, ?, ?)
+                """, (user_id, username, now, now, integrity))
             
             conn.commit()
             
@@ -307,6 +351,14 @@ class DatabaseService:
             row = cursor.fetchone()
             if row:
                 profile = dict(row)
+                # Check integrity
+                is_valid = get_integrity_service().verify_hash(
+                    profile, 
+                    ["user_id", "sightings_count", "first_seen"], 
+                    profile.get("integrity_hash")
+                )
+                profile['integrity_valid'] = is_valid
+                
                 # Parse JSON fields
                 profile['known_usernames'] = json.loads(profile.get('known_usernames') or '[]')
                 profile['tags'] = json.loads(profile.get('tags') or '[]')
@@ -340,6 +392,17 @@ class DatabaseService:
             results = []
             for row in cursor.fetchall():
                 profile = dict(row)
+                
+                # Check Integrity
+                try:
+                    profile['integrity_valid'] = get_integrity_service().verify_hash(
+                        profile, 
+                        ["user_id", "sightings_count", "first_seen"], 
+                        profile.get("integrity_hash")
+                    )
+                except:
+                    profile['integrity_valid'] = False
+                    
                 profile['known_usernames'] = json.loads(profile.get('known_usernames') or '[]')
                 profile['tags'] = json.loads(profile.get('tags') or '[]')
                 results.append(profile)
@@ -360,6 +423,17 @@ class DatabaseService:
             results = []
             for row in cursor.fetchall():
                 profile = dict(row)
+                
+                # Check Integrity
+                try:
+                    profile['integrity_valid'] = get_integrity_service().verify_hash(
+                        profile, 
+                        ["user_id", "sightings_count", "first_seen"], 
+                        profile.get("integrity_hash")
+                    )
+                except:
+                    profile['integrity_valid'] = False
+
                 profile['known_usernames'] = json.loads(profile.get('known_usernames') or '[]')
                 profile['tags'] = json.loads(profile.get('tags') or '[]')
                 results.append(profile)
@@ -504,10 +578,18 @@ class DatabaseService:
         conn = self._get_conn()
         try:
             # Insert log entry
+            # Calculate hash
+            integrity = get_integrity_service().generate_hash({
+                "timestamp": timestamp,
+                "user_id": user_id,
+                "event_kind": "join",
+                "location": location
+            }, ["timestamp", "user_id", "event_kind", "location"])
+            
             conn.execute("""
-                INSERT INTO join_logs (timestamp, user_id, username, event_kind, location)
-                VALUES (?, ?, ?, 'join', ?)
-            """, (timestamp, user_id, username, location))
+                INSERT INTO join_logs (timestamp, user_id, username, event_kind, location, integrity_hash)
+                VALUES (?, ?, ?, 'join', ?, ?)
+            """, (timestamp, user_id, username, location, integrity))
             conn.commit()
         finally:
             conn.close()
@@ -686,10 +768,19 @@ class DatabaseService:
         conn = self._get_conn()
         try:
             now = datetime.now().isoformat()
+            # Calculate hash
+            integrity = get_integrity_service().generate_hash({
+                "timestamp": now,
+                "group_id": group_id,
+                "user_id": user_id,
+                "action": action,
+                "reason": reason
+            }, ["timestamp", "group_id", "user_id", "action", "reason"])
+
             conn.execute("""
-                INSERT INTO automod_logs (timestamp, group_id, user_id, username, action, reason)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (now, group_id, user_id, username, action, reason))
+                INSERT INTO automod_logs (timestamp, group_id, user_id, username, action, reason, integrity_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (now, group_id, user_id, username, action, reason, integrity))
             conn.commit()
         finally:
             conn.close()
@@ -704,7 +795,87 @@ class DatabaseService:
                 ORDER BY timestamp DESC 
                 LIMIT ?
             """, (group_id, limit))
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                log = dict(row)
+                is_valid = get_integrity_service().verify_hash(
+                    log, 
+                    ["timestamp", "group_id", "user_id", "action", "reason"], 
+                    log.get("integrity_hash")
+                )
+                log['integrity_valid'] = is_valid
+                results.append(log)
+            return results
+        finally:
+            conn.close()
+
+    def get_integrity_report(self) -> dict:
+        """Scan entire database and report integrity stats"""
+        conn = self._get_conn()
+        stats = {
+            "total_records": 0,
+            "verified_records": 0,
+            "tampered_records": 0,
+            "unsigned_records": 0,
+            "details": {}
+        }
+        
+        try:
+            # Check Users
+            cursor = conn.execute("SELECT * FROM users")
+            users = cursor.fetchall()
+            stats["total_records"] += len(users)
+            stats["details"]["users"] = {"total": len(users), "tampered": 0}
+            
+            for row in users:
+                data = dict(row)
+                if not data.get("integrity_hash"):
+                    stats["unsigned_records"] += 1
+                    continue
+                    
+                is_valid = get_integrity_service().verify_hash(
+                    data, 
+                    ["user_id", "sightings_count", "first_seen"], 
+                    data.get("integrity_hash")
+                )
+                
+                if is_valid:
+                    stats["verified_records"] += 1
+                else:
+                    stats["tampered_records"] += 1
+                    stats["details"]["users"]["tampered"] += 1
+
+            # Check Join Logs
+            cursor = conn.execute("SELECT * FROM join_logs")
+            logs = cursor.fetchall()
+            stats["total_records"] += len(logs)
+            stats["details"]["join_logs"] = {"total": len(logs), "tampered": 0}
+
+            for row in logs:
+                data = dict(row)
+                if not data.get("integrity_hash"):
+                    stats["unsigned_records"] += 1
+                    continue
+
+                # event_kind/location logic needs to match log_join
+                # Note: log_join sets event_kind='join'. 
+                # Currently we only hash 'join' events fully.
+                # If event_kind is missing, default to join? No, DB has it.
+                
+                is_valid = get_integrity_service().verify_hash(
+                    data,
+                    ["timestamp", "user_id", "event_kind", "location"],
+                    data.get("integrity_hash")
+                )
+
+                if is_valid:
+                    stats["verified_records"] += 1
+                else:
+                    stats["tampered_records"] += 1
+                    stats["details"]["join_logs"]["tampered"] += 1
+            
+            return stats
+
         finally:
             conn.close()
 

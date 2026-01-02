@@ -88,61 +88,115 @@ class SettingsView(ft.Container):
             self._dev_card_ref.current.update()
 
     def _build_view(self) -> ft.Control:
-        """Build settings layout - compact version"""
+        """Build settings layout - Organized Tabbed Version"""
         
-        # Header - more compact
+        # Header
         header = ft.Column(
             controls=[
                 ft.Text(
                     "Settings",
-                    size=typography.size_xl,  # Reduced from 2xl
+                    size=typography.size_xl,
                     weight=ft.FontWeight.W_700,
                     color=colors.text_primary,
                 ),
                 ft.Text(
                     "Customize your experience and preferences",
-                    size=typography.size_sm,  # Reduced from base
+                    size=typography.size_sm,
                     color=colors.text_secondary,
                 ),
             ],
-            spacing=0,  # Reduced from xs
+            spacing=0,
         )
         
+        # Initialize sections
         self._theme_settings_control = self._build_theme_settings()
         
-        # Notification Settings Section
-        notification_section = self._build_notification_section()
-        
-        # XSOverlay Settings Section
-        xsoverlay_section = self._build_xsoverlay_section()
-        
-        # Update Section
-        update_section = self._build_update_section()
-        
-        # Credits Section
-        credits_section = self._build_credits_section()
-        
-        content_column = ft.Column(
-            controls=[
-                header,
-                ft.Container(height=spacing.sm),  # Reduced from lg
-                self._theme_settings_control,
-                ft.Container(height=spacing.md),  # Reduced from xl
-                notification_section,  # NEW: Notification settings
-                ft.Container(height=spacing.md),
-                xsoverlay_section,
-                ft.Container(height=spacing.md),  # Reduced from xl
-                update_section,
-                ft.Container(height=spacing.md),  # Reduced from xl
-                credits_section,
-                ft.Container(height=spacing.sm),  # Reduced from lg
+        # Create Tabs
+        self.tabs = ft.Tabs(
+            selected_index=0,
+            animation_duration=300,
+            indicator_color=colors.accent_primary,
+            label_color=colors.accent_primary,
+            unselected_label_color=colors.text_secondary,
+            divider_color=colors.glass_border,
+            tabs=[
+                ft.Tab(
+                    text="General",
+                    icon=ft.Icons.SETTINGS_SUGGEST_ROUNDED,
+                    content=ft.Container(
+                        content=ft.ListView(
+                            controls=[
+                                ft.Container(height=spacing.sm),
+                                self._theme_settings_control,
+                                ft.Container(height=spacing.md),
+                                self._build_update_section(),
+                                ft.Container(height=spacing.md),
+                                self._build_credits_section(),
+                                ft.Container(height=spacing.lg),
+                            ],
+                            padding=ft.padding.only(right=10),
+                        ),
+                        padding=spacing.sm
+                    )
+                ),
+                ft.Tab(
+                    text="Notifications",
+                    icon=ft.Icons.NOTIFICATIONS_ROUNDED,
+                    content=ft.Container(
+                        content=ft.ListView(
+                            controls=[
+                                ft.Container(height=spacing.sm),
+                                self._build_notification_section(),
+                                ft.Container(height=spacing.lg),
+                            ],
+                            padding=ft.padding.only(right=10),
+                        ),
+                        padding=spacing.sm
+                    )
+                ),
+                ft.Tab(
+                    text="Integrations",
+                    icon=ft.Icons.EXTENSION_ROUNDED,
+                    content=ft.Container(
+                        content=ft.ListView(
+                            controls=[
+                                ft.Container(height=spacing.sm),
+                                self._build_xsoverlay_section(),
+                                ft.Container(height=spacing.lg),
+                            ],
+                            padding=ft.padding.only(right=10),
+                        ),
+                        padding=spacing.sm
+                    )
+                ),
+                ft.Tab(
+                    text="System",
+                    icon=ft.Icons.STORAGE_ROUNDED,
+                    content=ft.Container(
+                        content=ft.ListView(
+                            controls=[
+                                ft.Container(height=spacing.sm),
+                                self._build_database_section(),
+                                ft.Container(height=spacing.lg),
+                            ],
+                            padding=ft.padding.only(right=10),
+                        ),
+                        padding=spacing.sm
+                    )
+                )
             ],
-            spacing=0,
-            scroll=ft.ScrollMode.AUTO,
             expand=True,
         )
         
-        return content_column
+        return ft.Column(
+            controls=[
+                header,
+                ft.Container(height=spacing.sm),
+                self.tabs,
+            ],
+            spacing=0,
+            expand=True,
+        )
     
     # ... (Theme Settings Code - kept primarily as is, just referenced) ...
     def _build_theme_settings(self) -> ft.Control:
@@ -802,10 +856,9 @@ class SettingsView(ft.Container):
             error_msg = f"Test failed: {str(ex)}"
         
         if error_msg:
-            self.page.snack_bar = ft.SnackBar(
+             self.page.snack_bar = ft.SnackBar(
                 content=ft.Text(f"❌ {error_msg}"),
-                bgcolor=colors.danger,
-                duration=5000
+                bgcolor=colors.danger
             )
         
         self.page.snack_bar.open = True
@@ -813,6 +866,48 @@ class SettingsView(ft.Container):
         
         self._xso_test_button.set_loading(False)
         self._xso_test_button.update()
+
+    def _handle_xso_throttle_toggle(self, e):
+        """Toggle performance throttling"""
+        alert_service = get_alert_service()
+        if alert_service:
+            # We don't have a direct setting for this in config yet, but would go here
+            pass
+
+    def _handle_xso_theme_sync_toggle(self, e):
+        """Toggle theme sync"""
+        # Future implementation
+        pass
+
+    def _build_database_section(self) -> ft.Control:
+        """Build Database Management Section"""
+        return GlassPanel(
+            content=ft.Column(
+                controls=[
+                    ft.Row(
+                        controls=[
+                            ft.Icon(ft.Icons.STORAGE_ROUNDED, color=colors.accent_primary),
+                            ft.Text("Database Management", size=typography.size_lg, weight=ft.FontWeight.W_600, color=colors.text_primary),
+                        ],
+                        spacing=spacing.sm,
+                    ),
+                    ft.Divider(color=colors.glass_border, height=spacing.md),
+                    ft.Text(
+                        "View and verify system records integrity.",
+                        size=typography.size_sm,
+                        color=colors.text_secondary,
+                    ),
+                    ft.Container(height=spacing.sm),
+                    NeonButton(
+                        text="Open Database Inspector",
+                        icon=ft.Icons.OPEN_IN_NEW_ROUNDED,
+                        on_click=lambda _: self.on_navigate("/database") if self.on_navigate else None,
+                        variant="secondary",
+                        width=250
+                    )
+                ]
+            )
+        )
     
     async def _handle_xso_throttle_toggle(self, e):
         """Toggle performance throttling"""
